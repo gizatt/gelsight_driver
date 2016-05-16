@@ -110,20 +110,19 @@ int main( int argc, char *argv[] )
         // wasteful but lower latency.
         Mat RawImage;
         capture >> RawImage;
-        RawImage.convertTo(RawImage, CV_32FC3);
-        RawImage /= 255.0;
         if (getUnixTime() - last_send_time > 0.0333){
             last_send_time = getUnixTime();
             if(!RawImage.empty())
             {
                 if (save_images){
                     std::ostringstream OutputFilename;
-                    OutputFilename.fill('0');
                     OutputFilename << "output/img_";
-                    OutputFilename << OutputImageNum;
+                    OutputFilename << setfill('0') << setw(7) << OutputImageNum;
                     OutputFilename << ".jpg";
                     imwrite(OutputFilename.str(), RawImage);
                 }
+                RawImage.convertTo(RawImage, CV_32FC3);
+                RawImage /= 255.0;
 
                 Mat RawImageDotsMap;
                 cvtColor(RawImage, RawImageDotsMap, CV_RGB2GRAY);
