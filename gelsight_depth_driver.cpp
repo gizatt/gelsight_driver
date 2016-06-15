@@ -171,15 +171,18 @@ int main( int argc, char *argv[] )
                 erode(ContactImage, ContactImage, elementOne);
                 
                 // do some compression
+
+                bool success = 0;
                 vector<uchar> buf;
+
                 Mat ContactImageEnc;
                 ContactImage.copyTo(ContactImageEnc);
                 ContactImageEnc *= 255.0;
                 ContactImageEnc.convertTo(ContactImageEnc, CV_8UC1);
-                bool success = imencode(".jpg", ContactImageEnc, buf);
+                success = imencode(".jpg", ContactImageEnc, buf);
                 if (success){
 
-                  // LCM encode and publish
+                  // LCM encode and publish contact image
                   bot_core_image_t imagemsg;
                   imagemsg.utime = getUnixTime() * 1000 * 1000;
                   imagemsg.width = ContactImage.cols;
@@ -190,6 +193,26 @@ int main( int argc, char *argv[] )
                   imagemsg.data = &buf[0];
                   imagemsg.nmetadata = 0;
                   bot_core_image_t_publish(lcm, "GELSIGHT_CONTACT", &imagemsg);
+                }
+
+                Mat RawImageEnc;
+                RawImage.copyTo(RawImageEnc);
+                RawImageEnc *= 255.0;
+                RawImageEnc.convertTo(RawImageEnc, CV_8UC1);
+                success = imencode(".jpg", RawImageEnc, buf);
+                if (success){
+
+                  // LCM encode and publish rgb image
+                  bot_core_image_t imagemsg;
+                  imagemsg.utime = getUnixTime() * 1000 * 1000;
+                  imagemsg.width = RawImage.cols;
+                  imagemsg.height = RawImage.rows;
+                  imagemsg.row_stride = 0;
+                  imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                  imagemsg.size = sizeof(uchar) * buf.size();
+                  imagemsg.data = &buf[0];
+                  imagemsg.nmetadata = 0;
+                  bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                 }
 
                 OutputImageNum++;
