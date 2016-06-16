@@ -171,15 +171,12 @@ int main( int argc, char *argv[] )
                 erode(ContactImage, ContactImage, elementOne);
                 
                 // do some compression
-
-                bool success = 0;
                 vector<uchar> buf;
-
                 Mat ContactImageEnc;
                 ContactImage.copyTo(ContactImageEnc);
                 ContactImageEnc *= 255.0;
                 ContactImageEnc.convertTo(ContactImageEnc, CV_8UC1);
-                success = imencode(".jpg", ContactImageEnc, buf);
+                bool success = imencode(".jpg", ContactImageEnc, buf);
                 if (success){
 
                   // LCM encode and publish contact image
@@ -195,22 +192,31 @@ int main( int argc, char *argv[] )
                   bot_core_image_t_publish(lcm, "GELSIGHT_CONTACT", &imagemsg);
                 }
 
+                // LCM encode and publish raw rgb array
                 Mat RawImageEnc;
                 RawImage.copyTo(RawImageEnc);
-                RawImageEnc *= 255.0;
-                RawImageEnc.convertTo(RawImageEnc, CV_8UC1);
-                success = imencode(".jpg", RawImageEnc, buf);
-                if (success){
+                {
+                  int scale = 4;
+                  int width = (RawImageEnc.cols/scale);
+                  int height = (RawImageEnc.rows/scale);
 
-                  // LCM encode and publish rgb image
+                  uint8_t img_values[width*height*3];
+                  for (int i=0; i<height; i++) {
+                    for (int j=0; j<width; j++) {
+                      Vec3f color = RawImageEnc.at<Vec3f>(i*scale,j*scale);
+                      img_values[(i*width + j)*3 + 0] = 125.0*color[2]; //B
+                      img_values[(i*width + j)*3 + 1] = 125.0*color[1]; //G
+                      img_values[(i*width + j)*3 + 2] = 125.0*color[0]; //R
+                    }
+                  }
                   bot_core_image_t imagemsg;
                   imagemsg.utime = getUnixTime() * 1000 * 1000;
-                  imagemsg.width = RawImage.cols;
-                  imagemsg.height = RawImage.rows;
-                  imagemsg.row_stride = 0;
+                  imagemsg.width = width;
+                  imagemsg.height = height;
+                  imagemsg.row_stride = height;
                   imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                  imagemsg.size = sizeof(uchar) * buf.size();
-                  imagemsg.data = &buf[0];
+                  imagemsg.size = width*height*3;
+                  imagemsg.data = &(img_values[0]);
                   imagemsg.nmetadata = 0;
                   bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                 }
