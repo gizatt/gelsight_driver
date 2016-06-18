@@ -12,9 +12,12 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <string>   // for strings
 #include <iomanip>  // for controlling float print precision
 #include <sstream>  // string to number conversion
+#include <fstream>  // nice number I/O
 #include <unistd.h> // for sleep
 #include <opencv2/opencv.hpp>
 #include <sys/stat.h> // mkdir
+
+#include "../eigen/Eigen/SparseCholesky" // for least squares solving
 
 #include <lcmtypes/bot_core_image_t.h>
 
@@ -24,6 +27,9 @@ using namespace cv;
 #define DOT_THRESHOLD 0.05
 #define DOT_DILATE_AMT 3 // removes small spurious points
 #define DOT_ERODE_AMT 8 // expands dots a big to get rid of edges
+#define FILTER_ROWS 15
+#define FILTER_COLS 15
+#define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
 
 void *lcmMonitor(void *plcm) {
   lcm_t *lcm = (lcm_t *) plcm;
@@ -46,6 +52,32 @@ int main( int argc, char *argv[] )
         printf("Usage: gelsight_depth_driver <save images to ./output?> <visualize?>\n");
         return 0;
     }
+
+    // load convolution kernel for converting Gelsight Image to raw image
+    Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
+    std::cout << "Loading filters from filter_data/..." << std::endl;
+    for (int c1=0; c1<3; c1++) {
+      for (int c2=0; c2<3; c2++) {
+        char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
+        sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
+        std::fstream myFile(filt_fn, std::ios_base::in);
+
+        float * buf = new float[FILTER_SIZE];
+        unsigned int counter = 0;
+        while (counter < FILTER_SIZE && myFile >> buf[counter]) {
+          printf("%f\n", buf[counter]);
+          counter++;
+        }
+        printf("counter: %d\n", counter);
+        std::cout << filt_fn << std::endl;
+
+        Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
+        tempMat.copyTo(conv_kernel[c1][c2]);
+      }
+    }
+
+    printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
+
     bool save_images = atoi(argv[1]);
     bool visualize = atoi(argv[2]);
     if (save_images)
