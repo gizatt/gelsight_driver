@@ -15,9 +15,11 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <fstream>  // nice number I/O
 #include <unistd.h> // for sleep
 #include <opencv2/opencv.hpp>
-#include <sys/stat.h> // mkdir
+
 
 #include "../eigen/Eigen/SparseCholesky" // for least squares solving
+#include <opencv2/core/eigen.hpp>
+#include <sys/stat.h> // mkdir
 
 #include <lcmtypes/bot_core_image_t.h>
 
@@ -30,6 +32,7 @@ using namespace cv;
 #define FILTER_ROWS 15
 #define FILTER_COLS 15
 #define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
+#define FILTER_IMROWS 96
 
 void *lcmMonitor(void *plcm) {
   lcm_t *lcm = (lcm_t *) plcm;
@@ -72,11 +75,13 @@ int main( int argc, char *argv[] )
         std::cout << filt_fn << std::endl;
 
         Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
-        tempMat.copyTo(conv_kernel[c1][c2]);
+        tempMat.copyTo(conv_kernel[2-c1][c2]);
       }
     }
 
     printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
+    printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
+    printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
 
     bool save_images = atoi(argv[1]);
     bool visualize = atoi(argv[2]);
@@ -133,6 +138,7 @@ int main( int argc, char *argv[] )
       namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "GradientImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "ContactImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "NormalsImage", cv::WINDOW_AUTOSIZE );
       startWindowThread();
     }
 
@@ -186,7 +192,38 @@ int main( int argc, char *argv[] )
                     }
                   }
                 }
-
+                
+                // make subsampled version of RawImage
+                unsigned int drows = FILTER_IMROWS;
+                unsigned int dcols = (unsigned int)(RawImage.cols * FILTER_IMROWS / RawImage.rows);
+                Size dsize(dcols, drows);
+                Mat RawImageSmall(drows, dcols, CV_32FC3);
+                resize(RawImage, RawImageSmall, dsize);
+                GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
+                // process into subsampled normals image
+                Mat NormalImageChannels[3];
+                Mat RawImageSmallChannels[3];
+                split(RawImageSmall, RawImageSmallChannels);
+                for (int cc=0; cc<3; cc++) {
+                  NormalImageChannels[cc] = Mat::zeros(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+                }
+                for (int c2=0; c2<2; c2++) { // skip channel 2, it's normal-Z, not important
+                  for (int c1=0; c1<3; c1++) {
+                    Mat tempMat(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+                    filter2D(-300*RawImageSmallChannels[c1], tempMat, -1, conv_kernel[c1][c2], Point((int)(FILTER_ROWS/2) + 1, (int)(FILTER_COLS/2) + 1), 0.0, BORDER_DEFAULT);
+                    NormalImageChannels[c2] += tempMat;
+                  }
+                }
+                // ...at this point, NormalImageChannels[0] and NormalImageChannels[1] store row- and column-wise gradients.
+                Mat NormalImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC3);
+                merge(NormalImageChannels, 3, NormalImage); // NOT strictly needed; just for vis
+                
+                // make Eigen.cpp vectors out of gradients
+//                Eigen:MatrixXf EigenGradrVec(RawImageSmall.rows);
+//                cv2eigen(NormalImageChannels[0], EigenGradrVec); // need to make a 640*480 - by - 1 column vectort out of channels 0 & 1
+                // TODO: build sparse matrices for gradients and for border
+                // TODO: use Eigen least squares to derive heightmap
+                
                 // binary contact sensing across image
                 Mat ContactImage(RawImage.rows, RawImage.cols, CV_32FC1);                
                 for(long int v=0; v<GradientImage.rows; v++) {
@@ -258,6 +295,7 @@ int main( int argc, char *argv[] )
                   cv::imshow("RawImage", RawImage);
                   cv::imshow("GradientImage", GradientImage / 100.);
                   cv::imshow("ContactImage", ContactImage);
+                  cv::imshow("NormalsImage", NormalImage);
                 }
             }
         }
