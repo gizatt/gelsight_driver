@@ -270,7 +270,10 @@ int main( int argc, char *argv[] )
                 // and we set zero so the borders are taken care of
                 printf("constructed, solving...\n");
                 // aaaaand done
-                x = solver.solveWithGuess(b, x);
+                if (isnan(x(0)))
+                  x = solver.solve(b);
+                else
+                  x = solver.solveWithGuess(b, x);
                 printf("solved\n");
 
                 Mat DepthImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
