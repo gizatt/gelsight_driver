@@ -94,21 +94,24 @@ int main( int argc, char *argv[] )
     pthread_t lcmThread;
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    VideoCapture capture(-1);   // Using -1 tells OpenCV to grab whatever camera is available.
+    VideoCapture capture(0);   // Using -1 tells OpenCV to grab whatever camera is available.
     if(!capture.isOpened()){
         std::cout << "Failed to connect to the camera." << std::endl;
         return(1);
     }
     capture.set(CV_CAP_PROP_FRAME_WIDTH,640);
     capture.set(CV_CAP_PROP_FRAME_HEIGHT,480);
+
+    Mat temp_image; capture >> temp_image; // warm up capture
+
     //capture.set(CV_CAP_PROP_EXPOSURE, -2);
     // use a command line tool to do this instead:
-    char buf[100];
+    char buf[300];
     int ret = 1;
     int vidi=0;
     // in case we're not on video0, loop through...
     while (ret != 0){
-      sprintf(buf, "v4lctl -c /dev/video%d bright 0", vidi);
+      sprintf(buf, "v4l2-ctl --device=/dev/video%d --set-ctrl=white_balance_temperature_auto=0,backlight_compensation=0,exposure_auto=1,exposure_absolute=30,exposure_auto_priority=0,gain=50", vidi);
       printf("Trying %s\n", buf);
       ret = system(buf);
       vidi++;
