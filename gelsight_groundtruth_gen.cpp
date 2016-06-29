@@ -18,7 +18,6 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 
 
 #include "../eigen/Eigen/IterativeLinearSolvers" // for least squares solving
-#include <opencv2/core/eigen.hpp>
 #include <sys/stat.h> // mkdir
 
 #include <lcmtypes/bot_core_image_t.h>
@@ -34,6 +33,8 @@ using namespace cv;
 #define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
 #define FILTER_IMROWS 96
 #define FILTER_IMCOLS 128
+#define BALL_RADIUS_GUESS 45
+#define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)
 
 void *lcmMonitor(void *plcm) {
   lcm_t *lcm = (lcm_t *) plcm;
@@ -72,8 +73,6 @@ int main( int argc, char *argv[] )
           printf("%f\n", buf[counter]);
           counter++;
         }
-        printf("counter: %d\n", counter);
-        std::cout << filt_fn << std::endl;
 
         Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
         flip(tempMat, tempMat, -1);
@@ -89,12 +88,19 @@ int main( int argc, char *argv[] )
     bool visualize = atoi(argv[2]);
     if (save_images)
         mkdir("output", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        
+    mkdir("sphereextracted", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    mkdir("spherealigned", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
+    Mat SphereReference;
+    SphereReference = imread("circle_standard.jpg");
+    SphereReference.convertTo(SphereReference, CV_32FC3);
+    
     lcm_t * lcm = lcm_create("udpm://239.255.76.67:7667?ttl=0");
     pthread_t lcmThread;
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    VideoCapture capture("samplevideo/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
+    VideoCapture capture("spherereference/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
     if(!capture.isOpened()){
         std::cout << "Failed to connect to the camera." << std::endl;
         return(1);
@@ -138,8 +144,8 @@ int main( int argc, char *argv[] )
 
     if (visualize){
       namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "NormalsImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "SphereImage", cv::WINDOW_AUTOSIZE );
       startWindowThread();
     }
 
@@ -200,12 +206,13 @@ int main( int argc, char *argv[] )
 
     double last_send_time = getUnixTime();
     int OutputImageNum = 0;
+    vector<Point> gt_centers;
     while (1) {
         // wasteful but lower latency.
+        if (getUnixTime() - last_send_time > 0.00333){
         Mat RawImage;
         Mat RawImageWithBG;
         capture >> RawImageWithBG;
-        if (getUnixTime() - last_send_time > 0.0333){
             last_send_time = getUnixTime();
             if(!RawImageWithBG.empty())
             {
@@ -271,21 +278,123 @@ int main( int argc, char *argv[] )
                   }
                 }
                 // and we set zero so the borders are taken care of
-                printf("constructed, solving...\n");
                 // aaaaand done
                 x = solver.solveWithGuess(b, x);
-                printf("solved\n");
 
                 Mat DepthImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
                 for (int u=0; u<RawImageSmall.cols; u++){
                   for (int v=0; v<RawImageSmall.rows; v++){
                     DepthImage.at<float>(v, u) = x(u*RawImageSmall.rows + v);
-                    if (u < 10 && v < 10){
-                      cout << x(u*RawImageSmall.rows + v) << ",";
+                  }
+                }
+                
+                
+                // Find circle in image
+                Mat GrayImage, SphereImage;
+                cvtColor(RawImageWithBG, GrayImage, CV_RGB2GRAY);
+                GrayImage.convertTo(GrayImage, CV_8UC1);
+                vector<Vec3f> circles;
+                HoughCircles(GrayImage, circles, CV_HOUGH_GRADIENT,
+                    1, GrayImage.rows/4, 100, 30, BALL_RADIUS_GUESS-10, BALL_RADIUS_GUESS+10);
+                
+                RawImageWithBG.copyTo(SphereImage);
+                cvtColor(SphereImage, SphereImage, CV_RGB2GRAY);
+                cvtColor(SphereImage, SphereImage, CV_GRAY2RGB);
+                
+                for( size_t i = 0; i < gt_centers.size(); i++ )
+                {
+                     // draw previous circle centers
+                     circle(SphereImage, gt_centers[i], 3, Scalar(0,255,0), -1, 8, 0 );
+                }
+                
+                for( size_t i = 0; i < circles.size(); i++ )
+                {
+                     Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
+                     int radius = cvRound(circles[i][2]);
+                     // draw the circle center
+                     circle(SphereImage, center, 3, Scalar(0,255,0), -1, 8, 0 );
+                     // draw the circle outline
+                     circle(SphereImage, center, 50, Scalar(0,0,255), 3, 8, 0 );
+                }
+                
+                Mat RawImageWithBGBlurred;
+                RawImageWithBG.copyTo(RawImageWithBGBlurred);
+                GaussianBlur(RawImageWithBGBlurred,RawImageWithBGBlurred,Size(51,51),1.0);
+                
+                if (circles.size() > 0) {
+                  // Write aligned sphere image
+                  Rect circleRect(cvRound(circles[0][0])-BALL_RADIUS_GUESS_MARGIN,cvRound(circles[0][1])-BALL_RADIUS_GUESS_MARGIN,2*BALL_RADIUS_GUESS_MARGIN,2*BALL_RADIUS_GUESS_MARGIN);
+                  
+                  if (!((circleRect.x < 0) || (circleRect.y < 0) || (circleRect.x + circleRect.width > RawImageWithBG.cols)
+                    || (circleRect.y + circleRect.height > RawImageWithBG.rows))) {
+                    
+                    Point aCenter (circles[0][0], circles[0][1]);
+                    gt_centers.push_back(aCenter);
+                    
+                    
+                    Mat SphereExtracted;
+                    SphereExtracted = RawImageWithBGBlurred(circleRect);
+                    
+                    {
+                      std::ostringstream OutputAlignedFilename;
+                      OutputAlignedFilename << "sphereextracted/img_";
+                      OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                      OutputAlignedFilename << ".jpg";
+                      imwrite(OutputAlignedFilename.str(), SphereExtracted);
+                    }
+                    
+                    printf("SphereReference value: %f\n",SphereReference.at<Vec3f>(10,10)[0]);
+                    
+                    Mat CorrImg;
+                    filter2D(SphereExtracted/255, CorrImg, CV_32FC3, SphereReference/255, Point(cvRound(SphereReference.rows/2),cvRound(SphereReference.cols/2)), 0.0, BORDER_REPLICATE);
+                    CorrImg = CorrImg / 10;
+
+                    // Find max point in correlation image
+                    {
+                      float maxVal = 0;
+                      int r = 0;
+                      int c = 0;
+                      for (int i=0; i<CorrImg.rows; i++) {
+                        for (int j=0; j<CorrImg.cols; j++) {
+                          Vec3f color = CorrImg.at<Vec3f>(i,j);
+                          float norm = (color[0]*color[0] + color[1]*color[1] + color[2]*color[2]);
+//                          float norm = color[0];
+//                          norm = (norm > color[1]) ? color[1] : norm;
+//                          norm = (norm > color[2]) ? color[2] : norm;
+                          if (maxVal < norm) {
+                            maxVal = norm;
+                            r = i;
+                            c = j;
+                          }
+                        }
+                      }
+                      Vec3f black(1.0, 0, 1.0);
+                      CorrImg.at<Vec3f>(r,c) = black;
+                      
+                      r -= cvRound(SphereReference.rows/2);
+                      c -= cvRound(SphereReference.cols/2);
+                      
+                      Mat SphereAligned;
+                      int top = (r > 0) ? 0 : -r;
+                      int bottom = (r < 0) ? 0 : r;
+                      int left = (c > 0) ? 0 : -c;
+                      int right = (c < 0) ? 0 : c;
+                      copyMakeBorder(SphereExtracted, SphereAligned, top, bottom, left, right, BORDER_REPLICATE);
+                      Rect alignedSphere (left+c,top+r,SphereReference.cols,SphereReference.rows);
+                      printf("%d,%d,%d,%d | %d,%d,%d,%d | %d,%d\n", \
+                          top,bottom,left,right,alignedSphere.x,alignedSphere.y,alignedSphere.width,alignedSphere.height,
+                          SphereAligned.rows, SphereAligned.cols);
+                      SphereAligned = SphereAligned(alignedSphere);
+                      
+                      if (r < 15 && c < 15 && r > -15 && c > -15) {
+                        std::ostringstream OutputAlignedFilename;
+                        OutputAlignedFilename << "spherealigned/img_";
+                        OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                        OutputAlignedFilename << ".jpg";
+                        imwrite(OutputAlignedFilename.str(), SphereAligned);
+                      }
                     }
                   }
-                  if (u < 11)
-                    cout << "\n";
                 }
                 
                 // do some compression
@@ -345,8 +454,8 @@ int main( int argc, char *argv[] )
                   cv::resize(NormalImage, NormalImageBigger, cv::Size(640, 480));
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
                   cv::imshow("RawImage", RawImageWithBG);
-                  cv::imshow("NormalsImage", NormalImageBigger);
                   cv::imshow("DepthImage", DepthImageBigger);
+                  cv::imshow("SphereImage", SphereImage);
                 }
             }
         }
