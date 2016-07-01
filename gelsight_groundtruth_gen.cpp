@@ -29,8 +29,8 @@ using namespace cv;
 #define BALL_RADIUS_GUESS 45
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
-#define REF_PT_ROWS 3
-#define REF_PT_COLS 4
+#define REF_PT_ROWS 6
+#define REF_PT_COLS 6
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
 #define REF_GET_IMCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
 #define SQDIST(x, y) ((x)*(x) + (y)*(y))
@@ -343,10 +343,10 @@ int main( int argc, char *argv[] )
         // renormalize image
         referencePointImgs[r][c] /= referencePointWeights[r][c];
         
-        // draw the circle center
-        circle(SphereImage, center, 3, Scalar(0,255,0), -1, 8, 0 );
-        // draw the circle outline
-        circle(SphereImage, center, 50, Scalar(0,0,255), 3, 8, 0 );
+//        // draw the circle center
+//        circle(SphereImage, center, 3, Scalar(0,255,0), -1, 8, 0 );
+//        // draw the circle outline
+//        circle(SphereImage, center, 50, Scalar(0,0,255), 3, 8, 0 );
         
         // Write out aligned image
         std::ostringstream OutputAlignedFilename;
