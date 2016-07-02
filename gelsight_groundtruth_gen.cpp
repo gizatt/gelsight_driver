@@ -44,18 +44,22 @@ static double getUnixTime(void)
     return (tv.tv_sec + (tv.tv_nsec / 1000000000.0));
 }
 
-/** e^(-(r/s)^2).
- * r should be in the range [0,1] for numerical stability.
- * 
- * e^(-(1^2)/(s^2)) ~= 0.0001
- * e^(-(0.5^2)/(s^2)) ~= 0.1
+/** 
+ * A quick power-function which calculates something
+ * like a mean-zero Gaussian PDF with a narrow sigma.
+ * Specifically, it calculates 10000^(-(r*r)).
  */
 static inline float erf(float r) {
     return pow(.0001,r*r);
 }
 
-int main( int argc, char *argv[] )
+int main(int argc, char *argv[])
 {
+    
+
+//    printf("Then the rest of the program happens.\n");
+//    return 0;
+
     if (argc != 1 +1){
         printf("Usage: gelsight_groundtruth_gen <visualize?>\n");
         return 0;
@@ -74,7 +78,7 @@ int main( int argc, char *argv[] )
     SphereReference = imread("groundtruth/circle_standard.jpg");
     SphereReference.convertTo(SphereReference, CV_32FC3);
     
-    VideoCapture capture("groundtruth/spherereference/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
+    VideoCapture capture("../my_gelsite_resources/spherereference/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
     if(!capture.isOpened()){
         std::cout << "Failed to connect to the camera." << std::endl;
         return(1);
