@@ -206,22 +206,25 @@ int main( int argc, char *argv[] )
     while (1) {
         // wasteful but lower latency.
         Mat RawImage;
-        capture >> RawImage;
+        Mat RawImageWithBG;
+        capture >> RawImageWithBG;
         if (getUnixTime() - last_send_time > 0.0333){
             last_send_time = getUnixTime();
-            if(!RawImage.empty())
+            if(!RawImageWithBG.empty())
             {
                 if (save_images){
                     std::ostringstream OutputFilename;
                     OutputFilename << "output/img_";
                     OutputFilename << setfill('0') << setw(7) << OutputImageNum;
                     OutputFilename << ".jpg";
-                    imwrite(OutputFilename.str(), RawImage);
+                    imwrite(OutputFilename.str(), RawImageWithBG);
                 }
+                RawImageWithBG.copyTo(RawImage);
                 RawImage.convertTo(RawImage, CV_32FC3);
                 RawImage /= 255.0;
 
                 RawImage -= BGImage;
+                
 
                 Mat RawImageDotsMap;
                 cvtColor(RawImage, RawImageDotsMap, CV_RGB2GRAY);
@@ -347,7 +350,7 @@ int main( int argc, char *argv[] )
                   Mat DepthImageBigger;
                   cv::resize(NormalImage, NormalImageBigger, cv::Size(640, 480));
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
-                  cv::imshow("RawImage", RawImage);
+                  cv::imshow("RawImage", RawImageWithBG);
                   cv::imshow("NormalsImage", NormalImageBigger);
                   cv::imshow("DepthImage", DepthImageBigger);
                 }
