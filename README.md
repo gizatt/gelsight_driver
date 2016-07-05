@@ -1,6 +1,6 @@
 # MIT RLG Gelsight Repository #
 
-===================
+--------------------
 
 Sandbox for drivers and experimental code for interface with Gelsight,
 for use with Robot Locomotion Group research.
@@ -11,47 +11,51 @@ for changing exposure values on the gelsight.
 
 
 
-## Deriving GroundTruth ##
+## Deriving Ground Truth ##
 
-1. The system offers a utility for generating a ground-truth lookup table
-from images of spheres imprinted at various locations around the
-surface of the GelSight sensor. To run this utility, make sure you
+1. Use `groundtruth_gen` utility to automatically generate a
+ground-truth look-up table from reference footage of ball bearings
+on the gelsight surface. To run this utility, make sure you
 first record the footage you will be using, eg. by running
 
-    ./build/gelsight_depth_driver
+        ./build/gelsight_depth_driver [ARGS]
 
-with the appropriate flags so that it saves all images.
+  with the appropriate argumentss so that it records all footage to some
+  output folder.
 
-2. Next, place these images in a folder `./spherereference/` such that they
-can all be accessed as `"spherereference/img_%07d.jpg"` (NOTE: This will change).
+2. Next, run the groundtruth generator on these image:
 
-3. Next, run the groundtruth generator. At first, you won't have a
-reference image to which to align the matched spheres; thus, simply
-run the groundtruth gen with no arguments:
+        ./build/groundtruth_gen [path_to_imgs]
 
-    ./build/groundtruth_gen
+  for example, if the images were in the `output` folder and were  named
+  `img_0000000.jpg` - `img_0000314.jpg` then one could run:
 
-This will create the folder `./groundtruth/` with the following structure:
+        ./build/groundtruth_gen output/img_%07d.jpg
 
-  * groundtruth/
-    * spherealigned/
-    * sphereextracted/
-    * sphererefptimgs/
-    * sphere_standard.jpg
-    * circle_index.csv
+  This will create the folder `./groundtruth/` with the following structure:
 
-This contains the ground truth information necessary to use a
-lookup-table-based approach to invert the depth map. If the images
-in `spherealigned/` look off-center, you can pick a new reference
-image by looking in `sphereextracted/` for a more-centered candidate.
-Copy this image to the top level directory:
+  * `groundtruth/`
+    * `spherealigned/`
+    * `sphereextracted/`
+    * `sphererefptimgs/`
+    * `sphere_standard.jpg`
+    * `circle_index.csv`
 
-    cp ./groundtruth/sphereextracted/img_0000XXX.jpg ./
+  This contains the ground truth information necessary to use a
+  look-up table  to invert the depth map (for reference, the final
+  derived sphere images are in `sphererefptimgs/`).
 
-Then, run `groundtruth_gen` again with this image as the "reference
-image":
+4. If the images in `spherealigned/` look off-center,
+  you can pick a new reference
+  image by looking in `sphereextracted/` for a more-centered or more-clear
+  candidate. Copy the desired image to the top level directory:
 
-    ./build/groundtruth_gen -r ./img_0000XXX.jpg
+        cp ./groundtruth/sphereextracted/img_0000XXX.jpg ./my_reference_img.jpg
 
-This will produced more-centered images.
+  Then, run `groundtruth_gen` again with this image as the "reference
+  image", eg.:
+
+        ./build/groundtruth_gen output/img_%07d.jpg -r ./my_reference_img.jpg
+
+  This will produced final images that are more centered.
 

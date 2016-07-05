@@ -28,13 +28,13 @@ using namespace cv;
 using namespace ez;
 
 #define DOT_THRESHOLD 0.05
-#define DOT_DILATE_AMT 3 // removes small spurious points
-#define DOT_ERODE_AMT 8 // expands dots a big to get rid of edges
-#define BALL_RADIUS_GUESS 45
-#define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)
+#define DOT_DILATE_AMT 3  // removes small spurious points
+#define DOT_ERODE_AMT 8  // expands dots a big to get rid of edges
+#define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
+#define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
-#define REF_PT_ROWS 6
-#define REF_PT_COLS 6
+#define REF_PT_ROWS 4  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
+#define REF_PT_COLS 3
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
 #define REF_GET_IMCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
 #define SQDIST(x, y) ((x)*(x) + (y)*(y))
@@ -72,8 +72,8 @@ int main(int argc, const char *argv[])
 
   opt.overview = "Takes several images of a ball bearing pressed into a gelsight and derives"
                  " a space-varying model for inverting normals.";
-  opt.syntax = "groundtruth_gen [-r reffilepath] [OPTIONS]";
-  opt.example = "groundtruth_gen -v 0\n\n";
+  opt.syntax = "groundtruth_gen [OPTIONS] path_to_video [OPTIONS]";
+  opt.example = "groundtruth_gen sphereference/img_%07d.jpg -v 0\n\n";
   opt.footer = "Robot Locomotion Group, geronm and gizatt\n";
 
   opt.add(
@@ -119,28 +119,51 @@ int main(int argc, const char *argv[])
     return 1;
   }
 
-  if (opt.lastArgs.size() > 0) {
-    std::cerr << "ERROR: Too many arguments.\n\n";
+  int totalNumArgs = opt.firstArgs.size() + opt.lastArgs.size() + opt.unknownArgs.size();
+
+  if (totalNumArgs != 2) {  // includes prorgram name argument.
+    std::cerr << "ERROR: Expected 1 argument.\n\n";
     Usage(opt);
     return 1;
   }
 
-  vector<string> badOptions;
-  int i;
-  if(!opt.gotRequired(badOptions)) {
-    for(i=0; i < badOptions.size(); ++i)
-      std::cerr << "ERROR: Missing required option " << badOptions[i] << ".\n\n";
-    Usage(opt);
-    return 1;
+  // Check for bad options
+  {
+    vector<string> badOptions;
+    int i;
+    if(!opt.gotRequired(badOptions)) {
+      for(i=0; i < badOptions.size(); ++i)
+        std::cerr << "ERROR: Missing required option " << badOptions[i] << ".\n\n";
+      Usage(opt);
+      return 1;
+    }
+
+    if(!opt.gotExpected(badOptions)) {
+      for(i=0; i < badOptions.size(); ++i)
+        std::cerr << "ERROR: Got unexpected number of arguments for option " << badOptions[i] << ".\n\n";
+
+      Usage(opt);
+      return 1;
+    }
   }
 
-  if(!opt.gotExpected(badOptions)) {
-    for(i=0; i < badOptions.size(); ++i)
-      std::cerr << "ERROR: Got unexpected number of arguments for option " << badOptions[i] << ".\n\n";
 
-    Usage(opt);
-    return 1;
+  // Make vector of non-option arguments (script can take them interleaved with options).
+  vector<string> allArgs;
+  for (int i=0; i<opt.firstArgs.size(); i++) {
+    allArgs.push_back(*(opt.firstArgs[i]));
   }
+  for (int i=0; i<opt.unknownArgs.size(); i++) {
+    allArgs.push_back(*(opt.unknownArgs[i]));
+  }
+  for (int i=0; i<opt.lastArgs.size(); i++) {
+    allArgs.push_back(*(opt.lastArgs[i]));
+  }
+
+  assert(allArgs.size() == totalNumArgs);
+
+  // First non-option argument is source of video.
+  string videoSource = allArgs[1];
 
   string refFramePath = "";
   if (opt.isSet("-r")) {
@@ -167,17 +190,17 @@ int main(int argc, const char *argv[])
   if (refFramePath.length() != 0) {
     SphereReference = imread(refFramePath.c_str());
     SphereReference.convertTo(SphereReference, CV_32FC3);
-    
+
     {
       std::ostringstream OutputAlignedFilename;
       OutputAlignedFilename << "groundtruth/sphere_standard.jpg";
       imwrite(OutputAlignedFilename.str(), SphereReference);
     }
-    
+
     assert(!SphereReference.empty());
   }
 
-  VideoCapture capture("spherereference/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
+  VideoCapture capture(videoSource);  // Using -1 tells OpenCV to grab whatever camera is available.
   if(!capture.isOpened()){
       std::cout << "Failed to connect to the camera." << std::endl;
       return(1);
@@ -322,19 +345,19 @@ int main(int argc, const char *argv[])
                 OutputAlignedFilename << ".jpg";
                 imwrite(OutputAlignedFilename.str(), SphereExtracted);
               }
-              
+
               // Check to see whether a reference frame was supplied by the user; if
               // not, the first detected sphere frame will serve as reference.
               if (SphereReference.empty()) {
                 SphereExtracted.copyTo(SphereReference);
                 SphereReference.convertTo(SphereReference, CV_32FC3);
-                
+
                 {
                   std::ostringstream OutputAlignedFilename;
                   OutputAlignedFilename << "groundtruth/sphere_standard.jpg";
                   imwrite(OutputAlignedFilename.str(), SphereReference);
                 }
-                
+
                 assert(!SphereReference.empty());
               }
 
