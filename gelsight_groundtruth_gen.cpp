@@ -72,8 +72,8 @@ int main(int argc, const char *argv[])
 
   opt.overview = "Takes several images of a ball bearing pressed into a gelsight and derives"
                  " a space-varying model for inverting normals.";
-  opt.syntax = "groundtruth_gen [-f refid] [OPTIONS]";
-  opt.example = "groundtruth_gen -f 2\n\n";
+  opt.syntax = "groundtruth_gen [-r reffilepath] [OPTIONS]";
+  opt.example = "groundtruth_gen -v 0\n\n";
   opt.footer = "Robot Locomotion Group, geronm and gizatt\n";
 
   opt.add(
@@ -93,9 +93,13 @@ int main(int argc, const char *argv[])
     0, // Required?
     1, // Number of args expected.
     0, // Delimiter if expecting multiple args.
-    "ID of detected ball frame to use as reference; all others will be aligned to this. -1 to use first detection.", // Help description.
-    "-f",     // Flag token.
-    "--frame-id" // Flag token.
+    "Path to detected ball frame image, to use as reference; all others will be aligned to this image."
+    " For best results, sphere should be centered in the image. If empty, the program will use the"
+    " first detected sphere as reference. Whichever image is used will be written to"
+    " ./groundtruth/sphere_standard.jpg. After running, look in ./groundtruth/sphereextracted/ to"
+    " find candidates for standard sphere.", // Help description.
+    "-r",     // Flag token.
+    "--ref-frame" // Flag token.
   );
 
   opt.add(
@@ -121,7 +125,7 @@ int main(int argc, const char *argv[])
     return 1;
   }
 
-  std::vector<std::string> badOptions;
+  vector<string> badOptions;
   int i;
   if(!opt.gotRequired(badOptions)) {
     for(i=0; i < badOptions.size(); ++i)
@@ -138,9 +142,9 @@ int main(int argc, const char *argv[])
     return 1;
   }
 
-  int refFrameID = -1;
-  if (opt.isSet("-f")) {
-    opt.get("-f")->getInt(refFrameID);
+  string refFramePath = "";
+  if (opt.isSet("-r")) {
+    opt.get("-r")->getString(refFramePath);
   }
 
   bool visualize = true;
@@ -150,6 +154,8 @@ int main(int argc, const char *argv[])
     visualize = (boolAsNum != 0);
   }
 
+  mkdir("groundtruth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
   mkdir("groundtruth/sphereextracted", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   mkdir("groundtruth/spherealigned", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   mkdir("groundtruth/sphererefptimgs", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -158,10 +164,20 @@ int main(int argc, const char *argv[])
   resultsFile.open("groundtruth/circle_index.csv");
 
   Mat SphereReference;
-  SphereReference = imread("groundtruth/circle_standard.jpg");
-  SphereReference.convertTo(SphereReference, CV_32FC3);
+  if (refFramePath.length() != 0) {
+    SphereReference = imread(refFramePath.c_str());
+    SphereReference.convertTo(SphereReference, CV_32FC3);
+    
+    {
+      std::ostringstream OutputAlignedFilename;
+      OutputAlignedFilename << "groundtruth/sphere_standard.jpg";
+      imwrite(OutputAlignedFilename.str(), SphereReference);
+    }
+    
+    assert(!SphereReference.empty());
+  }
 
-  VideoCapture capture("../my_gelsite_resources/spherereference/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
+  VideoCapture capture("spherereference/img_%07d.jpg");   // Using -1 tells OpenCV to grab whatever camera is available.
   if(!capture.isOpened()){
       std::cout << "Failed to connect to the camera." << std::endl;
       return(1);
@@ -305,6 +321,21 @@ int main(int argc, const char *argv[])
                 OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
                 OutputAlignedFilename << ".jpg";
                 imwrite(OutputAlignedFilename.str(), SphereExtracted);
+              }
+              
+              // Check to see whether a reference frame was supplied by the user; if
+              // not, the first detected sphere frame will serve as reference.
+              if (SphereReference.empty()) {
+                SphereExtracted.copyTo(SphereReference);
+                SphereReference.convertTo(SphereReference, CV_32FC3);
+                
+                {
+                  std::ostringstream OutputAlignedFilename;
+                  OutputAlignedFilename << "groundtruth/sphere_standard.jpg";
+                  imwrite(OutputAlignedFilename.str(), SphereReference);
+                }
+                
+                assert(!SphereReference.empty());
               }
 
               printf("SphereReference value: %f\n",SphereReference.at<Vec3f>(10,10)[0]);
