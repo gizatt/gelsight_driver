@@ -110,7 +110,13 @@ int main( int argc, char *argv[] )
     int ret = 1;
     int vidi=0;
     // in case we're not on video0, loop through...
+
+    struct timespec tim, tim2; // use awkward c convention to
+    tim.tv_sec = 0;            // set up half-second duration
+    tim.tv_nsec = 250000000L;
+
     while (ret != 0){
+      nanosleep(&tim, &tim2);
       sprintf(buf, "v4l2-ctl --device=/dev/video%d --set-ctrl=white_balance_temperature_auto=0,backlight_compensation=0,exposure_auto=1,exposure_absolute=30,exposure_auto_priority=0,gain=50", vidi);
       printf("Trying %s\n", buf);
       ret = system(buf);
