@@ -18,7 +18,8 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 
 
 #include "../eigen/Eigen/IterativeLinearSolvers" // for least squares solving
-#include <opencv2/core/eigen.hpp>
+#include "lib/libkdtree/kdtree++/kdtree.hpp" //
+#include "rgbToGradientOctNode.hpp"          // for rgb octree
 #include <sys/stat.h> // mkdir
 
 #include <lcmtypes/bot_core_image_t.h>
