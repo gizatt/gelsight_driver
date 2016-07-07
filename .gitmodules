@@ -1,0 +1,3 @@
+[submodule "lib/libkdtree"]
+	path = lib/libkdtree
+	url = git://git.debian.org/git/libkdtree/libkdtree.git
