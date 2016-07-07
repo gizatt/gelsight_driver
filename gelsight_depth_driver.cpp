@@ -111,6 +111,7 @@ int main( int argc, char *argv[] )
       printf("Trying %s\n", buf);
       ret = system(buf);
       vidi++;
+    }
 
     if (visualize){
       namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
