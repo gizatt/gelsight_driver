@@ -46,8 +46,8 @@ using namespace cv;
 #define REF_PT_COLS 3
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
 #define REF_GET_IMCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
-#define REF_GET_PTROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
-#define REF_GET_PTCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
+#define REF_GET_PTROW(imrow, imrows) ( ( (imrow) * (REF_PT_ROWS+1) ) / (imrows) )
+#define REF_GET_PTCOL(imcol, imcols) ( ( (imcol) * (REF_PT_COLS+1) ) / (imcols) )
 #define SQDIST(x, y) ((x)*(x) + (y)*(y))
 
 void *lcmMonitor(void *plcm) {
@@ -112,6 +112,12 @@ int main( int argc, char *argv[] )
       ret = system(buf);
       vidi++;
 
+    if (visualize){
+      namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
+      startWindowThread();
+    }
 
     // load convolution kernel for converting Gelsight Image to raw image
     Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
@@ -142,10 +148,10 @@ int main( int argc, char *argv[] )
 
 
     // populate octrees for RGB-to-Gradient lookup-based conversion
-    typedef KDTree::KDTree<3,rgbToGradientOctNode> OctreeType;
+    typedef KDTree::KDTree<3,rgbToGradientOctNode> RGBGradOctree;
     int refPtRows = 4;
     int refPtCols = 3;
-    OctreeType lookupTrees[refPtRows*refPtCols];
+    RGBGradOctree lookupTrees[refPtRows*refPtCols];
     for (int refr=0; refr<refPtRows; refr++) {
       for (int refc=0; refc<refPtCols; refc++) {
         // Load up the (r,c)-reference image
@@ -162,7 +168,7 @@ int main( int argc, char *argv[] )
         RefPtImage.convertTo(RefPtImage, CV_32FC3);
         RefPtImage /= 255.0;
 
-        OctreeType * currentTree = &(lookupTrees[refr*refPtCols + refc]);
+        RGBGradOctree * currentTree = &(lookupTrees[refr*refPtCols + refc]);
 
         int node_index = 0;
         for (int imr=0; imr<RefPtImage.rows; imr++) {
@@ -178,8 +184,8 @@ int main( int argc, char *argv[] )
               node.xyz[1] = bgr[1];
               node.xyz[2] = bgr[2];
               node.index = node_index;
-              node.rcgradient[0] = (imr - (RefPtImage.rows/2))/BALL_RADIUS_TIGHT;
-              node.rcgradient[1] = (imc - (RefPtImage.cols/2))/BALL_RADIUS_TIGHT;
+              node.rcgradient[0] = -(imc - (RefPtImage.cols/2))/BALL_RADIUS_TIGHT;
+              node.rcgradient[1] = -(imr - (RefPtImage.rows/2))/BALL_RADIUS_TIGHT;
 
               currentTree->insert(node);
 
@@ -192,16 +198,17 @@ int main( int argc, char *argv[] )
           }
         }
 
-        cv::namedWindow( "DEBUGRefPtImage", cv::WINDOW_AUTOSIZE );
-        cv::startWindowThread();
+        #if DEBUG_SHOW_REF
+        cv::namedWindow("DEBUGRefPtImage", cv::WINDOW_AUTOSIZE);
         cv::imshow("DEBUGRefPtImage", RefPtImage);
         {
-          struct timespec tim, tim2; // use awkward c convention to
-          tim.tv_sec = 0;            // set up half-second duration
+          struct timespec tim, tim2;
+          tim.tv_sec = 0;
           tim.tv_nsec = 050000000L;
           nanosleep(&tim,&tim2);
         }
         cv::imshow("DEBUGRefPtImage", RefPtImage);
+        #endif
       }
     }
 
@@ -228,18 +235,12 @@ int main( int argc, char *argv[] )
                                        Size( 2 + 1, 2+1 ),
                                        Point( 1, 1 ) );
 
-    if (visualize){
-      namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
-      startWindowThread();
-    }
-
     // make subsampled version of RawImage
     unsigned int drows = FILTER_IMROWS;
     unsigned int dcols = FILTER_IMCOLS;
     Size dsize(dcols, drows);
     Mat RawImageSmall(drows, dcols, CV_32FC3);
+    Mat RawImageWithBGSmall(drows, dcols, CV_32FC3);
 
     typedef Eigen::Triplet<float> T;
 
@@ -308,9 +309,9 @@ int main( int argc, char *argv[] )
                     OutputFilename << ".jpg";
                     imwrite(OutputFilename.str(), RawImageWithBG);
                 }
+                RawImageWithBG.convertTo(RawImageWithBG, CV_32FC3);
+                RawImageWithBG /= 255.0;
                 RawImageWithBG.copyTo(RawImage);
-                RawImage.convertTo(RawImage, CV_32FC3);
-                RawImage /= 255.0;
 
                 RawImage -= BGImage;
 
@@ -322,6 +323,7 @@ int main( int argc, char *argv[] )
                 erode(RawImageDotsMap, RawImageDotsMap, erodeElement);
 
                 resize(RawImage, RawImageSmall, dsize);
+                resize(RawImage, RawImageWithBGSmall, dsize);
                 GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
                 // process into subsampled normals image
 
@@ -352,22 +354,41 @@ int main( int argc, char *argv[] )
                     break;
                   case kUseLookupTable:
                     {
-                      RCGradientImageChannels[0].create(RawImageWithBG.rows, RawImageWithBG.cols, CV_32FC1);
-                      RCGradientImageChannels[1].create(RawImageWithBG.rows, RawImageWithBG.cols, CV_32FC1);
+                      printf("Readying lookup process...");
 
-                      for (int imr=0; imr < RawImageWithBG.rows; imr++) {
-                        for (int imc=0; imc < RawImageWithBG.cols; imc++) {
-                          // TODO:
-                          //  ~find closest refpt for (imr, imc)
-                          //  ~lookup color in that octree
-                          //  ~assign gradient to RCGradientImageChannels
-                          //  ~(opt) for performance, subsample all of these images
+                      RCGradientImageChannels[0].create(RawImageWithBGSmall.rows, RawImageWithBGSmall.cols, CV_32FC1);
+                      RCGradientImageChannels[1].create(RawImageWithBGSmall.rows, RawImageWithBGSmall.cols, CV_32FC1);
 
-                          RCGradientImageChannels[0].at<float>(imr,imc) = 0; // TODO set
-                          RCGradientImageChannels[1].at<float>(imr,imc) = 0;
+                      for (int imr=0; imr < RawImageWithBGSmall.rows; imr++) {
+                        for (int imc=0; imc < RawImageWithBGSmall.cols; imc++) {
+                          Vec3f color = RawImageWithBGSmall.at<Vec3f>(imr,imc);
+
+                          // find closest refpt for (imr, imc)
+                          int ptrow = max(0,min(REF_PT_ROWS-1,REF_GET_PTROW(imr, RawImageWithBGSmall.rows)));
+                          int ptcol = max(0,min(REF_PT_COLS-1,REF_GET_PTCOL(imc, RawImageWithBGSmall.cols)));
+
+                          // lookup color in that refpt's octree
+                          RGBGradOctree* currentTree = &(lookupTrees[ptrow * REF_PT_COLS + ptcol]);
+
+                          rgbToGradientOctNode testNode;
+                          testNode.xyz[0] = color[0];
+                          testNode.xyz[1] = color[1];
+                          testNode.xyz[2] = color[2];
+
+                          std::pair<RGBGradOctree::const_iterator,double> found = currentTree->find_nearest(testNode);
+                          rgbToGradientOctNode nearestNode = *found.first;
+                          if (found.second > .2) { // if the match is too far from any reference color take null hypothesis of flat slope
+                            nearestNode.rcgradient[0] = 0.0001;
+                            nearestNode.rcgradient[1] = 0.0001;
+                          }
+
+                          // assign gradient to RCGradientImageChannels
+                          RCGradientImageChannels[0].at<float>(imr,imc) = nearestNode.rcgradient[0];
+                          RCGradientImageChannels[1].at<float>(imr,imc) = nearestNode.rcgradient[1];
                         }
                       }
                     }
+                    break;
                   default:
                     std::cerr << "ERROR: Unexpected gradient finder mode encountered.\n";
                     return 1;
@@ -481,7 +502,7 @@ int main( int argc, char *argv[] )
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
                   cv::imshow("RawImage", RawImageWithBG);
                   cv::imshow("GradientVisImage", GradientVisImageBigger);
-                  cv::imshow("DepthImage", DepthImageBigger);
+                  cv::imshow("DepthImage", .25 * DepthImageBigger);
                 }
             }
         }
