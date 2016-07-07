@@ -15,6 +15,7 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <fstream>  // nice number I/O
 #include <unistd.h> // for sleep
 #include <opencv2/opencv.hpp>
+#include <math.h>
 
 
 #include "../eigen/Eigen/IterativeLinearSolvers" // for least squares solving
@@ -30,11 +31,24 @@ using namespace cv;
 #define DOT_THRESHOLD 0.05
 #define DOT_DILATE_AMT 3 // removes small spurious points
 #define DOT_ERODE_AMT 8 // expands dots a big to get rid of edges
+
 #define FILTER_ROWS 15
 #define FILTER_COLS 15
 #define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
 #define FILTER_IMROWS 96
 #define FILTER_IMCOLS 128
+
+#define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
+#define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
+#define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
+#define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS)
+#define REF_PT_ROWS 4  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
+#define REF_PT_COLS 3
+#define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
+#define REF_GET_IMCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
+#define REF_GET_PTROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
+#define REF_GET_PTCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
+#define SQDIST(x, y) ((x)*(x) + (y)*(y))
 
 void *lcmMonitor(void *plcm) {
   lcm_t *lcm = (lcm_t *) plcm;
@@ -58,36 +72,11 @@ int main( int argc, char *argv[] )
         return 0;
     }
 
-    // load convolution kernel for converting Gelsight Image to raw image
-    Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
-    std::cout << "Loading filters from filter_data/..." << std::endl;
-    for (int c1=0; c1<3; c1++) {
-      for (int c2=0; c2<3; c2++) {
-        char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
-        sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
-        std::fstream myFile(filt_fn, std::ios_base::in);
-
-        float * buf = new float[FILTER_SIZE];
-        unsigned int counter = 0;
-        while (counter < FILTER_SIZE && myFile >> buf[counter]) {
-          printf("%f\n", buf[counter]);
-          counter++;
-        }
-        printf("counter: %d\n", counter);
-        std::cout << filt_fn << std::endl;
-
-        Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
-        flip(tempMat, tempMat, -1);
-        tempMat.copyTo(conv_kernel[2-c1][c2]);
-      }
-    }
-
-    printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
-    printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
-    printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
+    enum GradMode { kUseLookupTable, kUseConvFilter, kUseOtherMethod };
 
     bool save_images = atoi(argv[1]);
     bool visualize = atoi(argv[2]);
+    GradMode gradMode = kUseConvFilter;
     if (save_images)
         mkdir("output", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
@@ -122,7 +111,100 @@ int main( int argc, char *argv[] )
       printf("Trying %s\n", buf);
       ret = system(buf);
       vidi++;
+
+
+    // load convolution kernel for converting Gelsight Image to raw image
+    Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
+    std::cout << "Loading filters from filter_data/..." << std::endl;
+    for (int c1=0; c1<3; c1++) {
+      for (int c2=0; c2<3; c2++) {
+        char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
+        sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
+        std::fstream myFile(filt_fn, std::ios_base::in);
+
+        float * buf = new float[FILTER_SIZE];
+        unsigned int counter = 0;
+        while (counter < FILTER_SIZE && myFile >> buf[counter]) {
+          printf("%f\n", buf[counter]);
+          counter++;
+        }
+        printf("counter: %d\n", counter);
+        std::cout << filt_fn << std::endl;
+
+        Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
+        flip(tempMat, tempMat, -1);
+        tempMat.copyTo(conv_kernel[2-c1][c2]);
+      }
     }
+    printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
+    printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
+    printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
+
+
+    // populate octrees for RGB-to-Gradient lookup-based conversion
+    typedef KDTree::KDTree<3,rgbToGradientOctNode> OctreeType;
+    int refPtRows = 4;
+    int refPtCols = 3;
+    OctreeType lookupTrees[refPtRows*refPtCols];
+    for (int refr=0; refr<refPtRows; refr++) {
+      for (int refc=0; refc<refPtCols; refc++) {
+        // Load up the (r,c)-reference image
+        Mat RefPtImage;
+        {
+          std::ostringstream ImageFilename;
+          ImageFilename << "groundtruth/sphererefptimgs/img_";
+          ImageFilename << "r" << setfill('0') << setw(4) << refr;
+          ImageFilename << "c" << setfill('0') << setw(4) << refc;
+          ImageFilename << ".jpg";
+
+          RefPtImage = imread(ImageFilename.str());
+        }
+        RefPtImage.convertTo(RefPtImage, CV_32FC3);
+        RefPtImage /= 255.0;
+
+        OctreeType * currentTree = &(lookupTrees[refr*refPtCols + refc]);
+
+        int node_index = 0;
+        for (int imr=0; imr<RefPtImage.rows; imr++) {
+          for (int imc=0; imc<RefPtImage.cols; imc++) {
+
+            double rdist = hypot(imr - (RefPtImage.rows/2), imc - (RefPtImage.cols/2));
+            if (rdist < BALL_RADIUS_TIGHT) { // only take points that we believe are on the surface of the sphere
+              // compute gradients at current imr,imc place them in tree under RGB value
+              Vec3f bgr = RefPtImage.at<Vec3f>(imc,imr);
+
+              rgbToGradientOctNode node;
+              node.xyz[0] = bgr[0];
+              node.xyz[1] = bgr[1];
+              node.xyz[2] = bgr[2];
+              node.index = node_index;
+              node.rcgradient[0] = (imr - (RefPtImage.rows/2))/BALL_RADIUS_TIGHT;
+              node.rcgradient[1] = (imc - (RefPtImage.cols/2))/BALL_RADIUS_TIGHT;
+
+              currentTree->insert(node);
+
+              node_index++;
+            } else {
+              Vec3f white(1,1,1);
+              RefPtImage.at<Vec3f>(imc,imr) /= 2;
+              RefPtImage.at<Vec3f>(imc,imr) += .5 * white; //average self with white
+            }
+          }
+        }
+
+        cv::namedWindow( "DEBUGRefPtImage", cv::WINDOW_AUTOSIZE );
+        cv::startWindowThread();
+        cv::imshow("DEBUGRefPtImage", RefPtImage);
+        {
+          struct timespec tim, tim2; // use awkward c convention to
+          tim.tv_sec = 0;            // set up half-second duration
+          tim.tv_nsec = 050000000L;
+          nanosleep(&tim,&tim2);
+        }
+        cv::imshow("DEBUGRefPtImage", RefPtImage);
+      }
+    }
+
 
     // get calibration image immediately
     Mat BGImage;
@@ -148,7 +230,7 @@ int main( int argc, char *argv[] )
 
     if (visualize){
       namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "NormalsImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
       startWindowThread();
     }
@@ -167,7 +249,7 @@ int main( int argc, char *argv[] )
     int b_row = 0;
     for (int u=1; u<RawImageSmall.cols-1; u++){
       for (int v=1; v<RawImageSmall.rows; v++){
-        A_coeffs.push_back(T(a_row, u*RawImageSmall.rows + (v - 1),  -1)); 
+        A_coeffs.push_back(T(a_row, u*RawImageSmall.rows + (v - 1),  -1));
         A_coeffs.push_back(T(a_row, u*RawImageSmall.rows + (v), 1));
         a_row++;
       }
@@ -197,7 +279,7 @@ int main( int argc, char *argv[] )
       a_row++;
     }
     Eigen::SparseMatrix<float> A(a_row, RawImageSmall.rows * RawImageSmall.cols);
-    A.setFromTriplets(A_coeffs.begin(), A_coeffs.end()); 
+    A.setFromTriplets(A_coeffs.begin(), A_coeffs.end());
     Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<float> > solver;
     solver.setMaxIterations(100);
     printf("Going into qr solve...\n");
@@ -231,52 +313,92 @@ int main( int argc, char *argv[] )
                 RawImage /= 255.0;
 
                 RawImage -= BGImage;
-                
+
 
                 Mat RawImageDotsMap;
                 cvtColor(RawImage, RawImageDotsMap, CV_RGB2GRAY);
                 cv::threshold(RawImageDotsMap, RawImageDotsMap, DOT_THRESHOLD, 1.0, CV_THRESH_BINARY);
                 dilate(RawImageDotsMap, RawImageDotsMap, dilateElement);
                 erode(RawImageDotsMap, RawImageDotsMap, erodeElement);
-                
+
                 resize(RawImage, RawImageSmall, dsize);
                 GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
                 // process into subsampled normals image
-                Mat NormalImageChannels[3];
-                Mat RawImageSmallChannels[3];
-                split(RawImageSmall, RawImageSmallChannels);
-                for (int cc=0; cc<3; cc++) {
-                  NormalImageChannels[cc] = Mat::zeros(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+
+
+                Mat RCGradientImageChannels[2];
+
+                switch (gradMode) {
+
+                  case kUseConvFilter:
+                    {
+                      Mat NormalImageChannels[3];
+                      Mat RawImageSmallChannels[3];
+                      split(RawImageSmall, RawImageSmallChannels);
+                      for (int cc=0; cc<3; cc++) {
+                        NormalImageChannels[cc] = Mat::zeros(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+                      }
+                      for (int c2=0; c2<2; c2++) { // skip channel 2, it's normal-Z, not important
+                        for (int c1=0; c1<3; c1++) {
+                          Mat tempMat(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+                          filter2D(-300*RawImageSmallChannels[c1], tempMat, -1, conv_kernel[c1][c2], Point((int)(FILTER_ROWS/2) + 1, (int)(FILTER_COLS/2) + 1), 0.0, BORDER_DEFAULT);
+                          NormalImageChannels[c2] += tempMat;
+                        }
+                      }
+                      // ...at this point, NormalImageChannels[0] and NormalImageChannels[1] store row- and column-wise gradients.
+                      RCGradientImageChannels[0] = NormalImageChannels[0];
+                      RCGradientImageChannels[1] = NormalImageChannels[1];
+                    }
+                    break;
+                  case kUseLookupTable:
+                    {
+                      RCGradientImageChannels[0].create(RawImageWithBG.rows, RawImageWithBG.cols, CV_32FC1);
+                      RCGradientImageChannels[1].create(RawImageWithBG.rows, RawImageWithBG.cols, CV_32FC1);
+
+                      for (int imr=0; imr < RawImageWithBG.rows; imr++) {
+                        for (int imc=0; imc < RawImageWithBG.cols; imc++) {
+                          // TODO:
+                          //  ~find closest refpt for (imr, imc)
+                          //  ~lookup color in that octree
+                          //  ~assign gradient to RCGradientImageChannels
+                          //  ~(opt) for performance, subsample all of these images
+
+                          RCGradientImageChannels[0].at<float>(imr,imc) = 0; // TODO set
+                          RCGradientImageChannels[1].at<float>(imr,imc) = 0;
+                        }
+                      }
+                    }
+                  default:
+                    std::cerr << "ERROR: Unexpected gradient finder mode encountered.\n";
+                    return 1;
                 }
-                for (int c2=0; c2<2; c2++) { // skip channel 2, it's normal-Z, not important
-                  for (int c1=0; c1<3; c1++) {
-                    Mat tempMat(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
-                    filter2D(-300*RawImageSmallChannels[c1], tempMat, -1, conv_kernel[c1][c2], Point((int)(FILTER_ROWS/2) + 1, (int)(FILTER_COLS/2) + 1), 0.0, BORDER_DEFAULT);
-                    NormalImageChannels[c2] += tempMat;
-                  }
-                }
-                // ...at this point, NormalImageChannels[0] and NormalImageChannels[1] store row- and column-wise gradients.
-                Mat NormalImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC3);
-                merge(NormalImageChannels, 3, NormalImage); // NOT strictly needed; just for vis
-                
-                // now compose our solve to generate the gradient map:
+
+                Mat GradientVisImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC3);
+                Mat GradientVisImageChannels[3];
+                GradientVisImageChannels[0] = RCGradientImageChannels[0];
+                GradientVisImageChannels[1] = RCGradientImageChannels[1];
+                GradientVisImageChannels[2] = 0*RCGradientImageChannels[0]; // Don't need a third channel for this vis
+                merge(GradientVisImageChannels, 3, GradientVisImage); // NOT strictly needed; just for vis
+
+                // now use least squares to generate the height map:
                 // we'll create a linear problem Ax = b
-                // where each constaint (row in A, value in b) constrains a pair of 
-                // points in the image to generate a gradient value
-                
+                // where each constaint (row in A, value in b) penalizes the
+                // deviation of a pair of adjacent points in the image
+                // from the expected gradient value
+
                 Eigen::VectorXf b(a_row);
                 b.setZero();
                 b_row = 0;
                 for (int u=1; u<RawImageSmall.cols-1; u++){
                   for (int v=1; v<RawImageSmall.rows; v++){
-                    b(b_row) = NormalImageChannels[0].at<float>(v, u);
+                    b(b_row) = RCGradientImageChannels[0].at<float>(v, u);
                     b_row++;
                   }
                 }
                 // and col gradients
                 for (int u=1; u<RawImageSmall.cols; u++){
                   for (int v=1; v<RawImageSmall.rows-1; v++){
-                    b(b_row) = NormalImageChannels[1].at<float>(v, u);
+                    b(b_row) = RCGradientImageChannels[1].at<float>(v, u);
                     b_row++;
                   }
                 }
@@ -300,7 +422,7 @@ int main( int argc, char *argv[] )
                   if (u < 11)
                     cout << "\n";
                 }
-                
+
                 // do some compression
                 vector<uchar> buf;
                 Mat DepthImageEnc;
@@ -353,12 +475,12 @@ int main( int argc, char *argv[] )
 
                 OutputImageNum++;
                 if (visualize){
-                  Mat NormalImageBigger;
+                  Mat GradientVisImageBigger;
                   Mat DepthImageBigger;
-                  cv::resize(NormalImage, NormalImageBigger, cv::Size(640, 480));
+                  cv::resize(GradientVisImage, GradientVisImageBigger, cv::Size(640, 480));
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
                   cv::imshow("RawImage", RawImageWithBG);
-                  cv::imshow("NormalsImage", NormalImageBigger);
+                  cv::imshow("GradientVisImage", GradientVisImageBigger);
                   cv::imshow("DepthImage", DepthImageBigger);
                 }
             }
