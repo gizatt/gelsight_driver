@@ -6,7 +6,9 @@ LIB_OBJS = $(addprefix $(BUILD_DIR)/, CaptureFrm.o MarkerTrack.o VideoRecord.o W
 
 
 CFLAGS_DRIVER += `pkg-config --cflags opencv lcm bot2-core`
+CFLAGS_DRIVER += '-I/usr/include/vtk-5.8'
 LIBS_DRIVER += `pkg-config --libs opencv lcm bot2-core`
+LIBS_DRIVER += -lvtkCommon -lvtkHybrid -lvtkGenericFiltering -lvtkVolumeRendering -lvtksys -lvtkFiltering -lvtkRendering -lvtkIO -lvtkGraphics -lvtkexoIIc -lvtkImaging -lvtkftgl -lvtkDICOMParser
 
 all: prepare $(LIB_OBJS) $(BUILD_DIR)/main $(BUILD_DIR)/gelsight_depth_driver $(BUILD_DIR)/groundtruth_gen
 

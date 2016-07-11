@@ -15,8 +15,27 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <fstream>  // nice number I/O
 #include <unistd.h> // for sleep
 #include <opencv2/opencv.hpp>
+#include <opencv2/highgui.hpp>
 #include <math.h>
 
+// 3D vis via VTK
+#include <vtkSmartPointer.h>
+#include <vtkActor.h>
+#include <vtkDelaunay2D.h>
+#include <vtkLookupTable.h>
+#include <vtkMath.h>
+#include <vtkPointData.h>
+#include <vtkPoints.h>
+#include <vtkPolyData.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkProperty.h>
+#include <vtkRenderWindow.h>
+#include <vtkRenderWindowInteractor.h>
+#include <vtkRenderer.h>
+#include <vtkVertexGlyphFilter.h>
+#include <vtkXMLPolyDataWriter.h>
+#include "vtkCamera.h"
+#include "vtkCylinderSource.h"
 
 #include "../eigen/Eigen/IterativeLinearSolvers" // for least squares solving
 #include "lib/libkdtree/kdtree++/kdtree.hpp" //
@@ -105,6 +124,7 @@ int main( int argc, char *argv[] )
     tim.tv_sec = 0;            // set up half-second duration
     tim.tv_nsec = 250000000L;
 
+    /*
     while (ret != 0){
       nanosleep(&tim, &tim2);
       sprintf(buf, "v4l2-ctl --device=/dev/video%d --set-ctrl=white_balance_temperature_auto=0,backlight_compensation=0,exposure_auto=1,exposure_absolute=30,exposure_auto_priority=0,gain=50", vidi);
@@ -112,13 +132,95 @@ int main( int argc, char *argv[] )
       ret = system(buf);
       vidi++;
     }
-
+*/
     if (visualize){
-      namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "RawImage", cv::WINDOW_NORMAL | CV_WINDOW_KEEPRATIO );
+      moveWindow( "RawImage", 0, 0);
+      namedWindow( "GradientVisImage", cv::WINDOW_NORMAL | CV_WINDOW_KEEPRATIO);
+      moveWindow( "GradientVisImage", 0, 640);
+      namedWindow( "DepthImage", cv::WINDOW_NORMAL );
+      moveWindow( "DepthImage", 480, 0);
       startWindowThread();
     }
+
+    // Create a grid of points (height/terrian map)
+    vtkSmartPointer<vtkPoints> points = 
+      vtkSmartPointer<vtkPoints>::New();
+   
+    unsigned int GridSize = 20;
+    double xx, yy, zz;
+    std::map<int, vtkIdType> point_index_map;
+    for(unsigned int x = 0; x < GridSize; x++)
+    {
+      for(unsigned int y = 0; y < GridSize; y++)
+      {
+      xx = x + vtkMath::Random(-.2, .2);
+      yy = y + vtkMath::Random(-.2, .2);
+      zz = vtkMath::Random(-.5, .5);
+      point_index_map[x*GridSize+y] = points->InsertNextPoint(xx / GridSize + 1, yy / GridSize + 1, zz);
+      }
+    }
+
+// This creates a polygonal cylinder model with eight circumferential facets
+// (i.e, in practice an octagonal prism).
+vtkSmartPointer<vtkCylinderSource> cylinder =
+  vtkSmartPointer<vtkCylinderSource>::New();
+cylinder->SetResolution(8);
+
+// The mapper is responsible for pushing the geometry into the graphics library.
+// It may also do color mapping, if scalars or other attributes are defined.
+vtkSmartPointer<vtkPolyDataMapper> cylinderMapper =
+  vtkSmartPointer<vtkPolyDataMapper>::New();
+cylinderMapper->SetInputConnection(cylinder->GetOutputPort());
+
+// The actor is a grouping mechanism: besides the geometry (mapper), it
+// also has a property, transformation matrix, and/or texture map.
+// Here we set its color and rotate it around the X and Y axes.
+vtkSmartPointer<vtkActor> cylinderActor =
+  vtkSmartPointer<vtkActor>::New();
+cylinderActor->SetMapper(cylinderMapper);
+cylinderActor->GetProperty()->SetColor(1.0000, 0.3882, 0.2784);
+cylinderActor->RotateX(30.0);
+cylinderActor->RotateY(-45.0);
+
+    // Add the grid points to a polydata object
+    vtkSmartPointer<vtkPolyData> inputPolyData = 
+      vtkSmartPointer<vtkPolyData>::New();
+    inputPolyData->SetPoints(points);
+   
+    // Triangulate the grid points
+    vtkSmartPointer<vtkDelaunay2D> delaunay = 
+      vtkSmartPointer<vtkDelaunay2D>::New();
+    delaunay->SetInput(inputPolyData);
+    delaunay->Update();
+    vtkPolyData* outputPolyData = delaunay->GetOutput();
+
+    // Create a mapper and actor
+    vtkSmartPointer<vtkPolyDataMapper> mapper = 
+      vtkSmartPointer<vtkPolyDataMapper>::New();
+    mapper->SetInputConnection(outputPolyData->GetProducerPort()); 
+    vtkSmartPointer<vtkActor> actor = 
+      vtkSmartPointer<vtkActor>::New();
+    actor->SetMapper(mapper);
+
+    // Create a VTK renderer, render window, and interactor
+    vtkSmartPointer<vtkRenderer> renderer =
+      vtkSmartPointer<vtkRenderer>::New();
+    vtkSmartPointer<vtkRenderWindow> renderWindow =
+      vtkSmartPointer<vtkRenderWindow>::New();
+    renderWindow->AddRenderer(renderer);
+    vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor =
+      vtkSmartPointer<vtkRenderWindowInteractor>::New();
+    renderWindowInteractor->SetRenderWindow(renderWindow);
+
+renderer->AddActor(cylinderActor);
+  
+    renderer->SetBackground(.1, .2, .3);
+    renderer->AddActor(actor);
+    renderWindow->Render();
+    renderWindowInteractor->Initialize();
+
+
 
     // load convolution kernel for converting Gelsight Image to raw image
     Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
@@ -425,25 +527,54 @@ int main( int argc, char *argv[] )
                   }
                 }
                 // and we set zero so the borders are taken care of
-                printf("constructed, solving...\n");
+
                 // aaaaand done
                 if (isnan(x(0)))
                   x = solver.solve(b);
                 else
                   x = solver.solveWithGuess(b, x);
-                printf("solved\n");
 
                 Mat DepthImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
                 for (int u=0; u<RawImageSmall.cols; u++){
                   for (int v=0; v<RawImageSmall.rows; v++){
                     DepthImage.at<float>(v, u) = x(u*RawImageSmall.rows + v);
-                    if (u < 10 && v < 10){
-                      cout << x(u*RawImageSmall.rows + v) << ",";
+                    //if (u < 10 && v < 10){
+                      //cout << x(u*RawImageSmall.rows + v) << ",";
+                    //}
+                  }
+                  //if (u < 11)
+                    //cout << "\n";
+                }
+
+                // Also do VTK vis
+                if (points->GetNumberOfPoints() != x.rows()){
+                  points->Initialize();
+                  printf("Resetting VTK\n");
+                  point_index_map.clear();
+                  for (int u=0; u<RawImageSmall.cols; u++){
+                    for (int v=0; v<RawImageSmall.rows; v++){
+                      double z = x(u*RawImageSmall.rows + v);
+                      point_index_map[u*RawImageSmall.rows + v] = 
+                        points->InsertNextPoint(((double)u)/RawImageSmall.cols,
+                                                ((double)v)/RawImageSmall.rows, 
+                                                z);
                     }
                   }
-                  if (u < 11)
-                    cout << "\n";
+                } else {
+                  for (int u=0; u<RawImageSmall.cols; u++){
+                    for (int v=0; v<RawImageSmall.rows; v++){
+                      double z = x(u*RawImageSmall.rows + v);
+                      points->SetPoint(point_index_map[u*RawImageSmall.rows + v], 
+                                                ((double)u)/RawImageSmall.cols,
+                                                ((double)v)/RawImageSmall.rows, 
+                                                z);
+                    }
+                  }
                 }
+
+                // propagate everything through
+                //inputPolyData->Modified();
+                //renderWindow->Render();
 
                 // do some compression
                 vector<uchar> buf;
