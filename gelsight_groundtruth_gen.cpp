@@ -33,8 +33,8 @@ using namespace ez;
 #define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
-#define REF_PT_ROWS 4  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
-#define REF_PT_COLS 3
+#define REF_PT_ROWS 3  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
+#define REF_PT_COLS 4
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
 #define REF_GET_IMCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
 #define SQDIST(x, y) ((x)*(x) + (y)*(y))

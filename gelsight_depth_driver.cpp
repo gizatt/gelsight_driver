@@ -42,13 +42,14 @@ using namespace cv;
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
 #define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS)
-#define REF_PT_ROWS 4  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
-#define REF_PT_COLS 3
+#define REF_PT_ROWS 3  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
+#define REF_PT_COLS 4
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
 #define REF_GET_IMCOL(ptcol, imcols) ( ((1+(ptcol)) * (imcols)) / (1+REF_PT_COLS) )
 #define REF_GET_PTROW(imrow, imrows) ( ( (imrow) * (REF_PT_ROWS+1) ) / (imrows) )
 #define REF_GET_PTCOL(imcol, imcols) ( ( (imcol) * (REF_PT_COLS+1) ) / (imcols) )
 #define SQDIST(x, y) ((x)*(x) + (y)*(y))
+#define MACRO_MAX(x, y) ((x) > (y) ? (x) : (y))
 
 void *lcmMonitor(void *plcm) {
   lcm_t *lcm = (lcm_t *) plcm;
@@ -77,8 +78,10 @@ int main( int argc, char *argv[] )
     bool save_images = atoi(argv[1]);
     bool visualize = atoi(argv[2]);
     GradMode gradMode = kUseConvFilter;
-    if (save_images)
+    if (save_images) {
         mkdir("output", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+        mkdir("outputdepth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    }
 
     lcm_t * lcm = lcm_create("udpm://239.255.76.67:7667?ttl=0");
     pthread_t lcmThread;
@@ -150,11 +153,9 @@ int main( int argc, char *argv[] )
 
     // populate octrees for RGB-to-Gradient lookup-based conversion
     typedef KDTree::KDTree<3,rgbToGradientOctNode> RGBGradOctree;
-    int refPtRows = 4;
-    int refPtCols = 3;
-    RGBGradOctree lookupTrees[refPtRows*refPtCols];
-    for (int refr=0; refr<refPtRows; refr++) {
-      for (int refc=0; refc<refPtCols; refc++) {
+    RGBGradOctree lookupTrees[REF_PT_ROWS*REF_PT_COLS];
+    for (int refr=0; refr<REF_PT_ROWS; refr++) {
+      for (int refc=0; refc<REF_PT_COLS; refc++) {
         // Load up the (r,c)-reference image
         Mat RefPtImage;
         {
@@ -169,7 +170,7 @@ int main( int argc, char *argv[] )
         RefPtImage.convertTo(RefPtImage, CV_32FC3);
         RefPtImage /= 255.0;
 
-        RGBGradOctree * currentTree = &(lookupTrees[refr*refPtCols + refc]);
+        RGBGradOctree * currentTree = &(lookupTrees[refr*REF_PT_COLS + refc]);
 
         int node_index = 0;
         for (int imr=0; imr<RefPtImage.rows; imr++) {
@@ -185,8 +186,13 @@ int main( int argc, char *argv[] )
               node.xyz[1] = bgr[1];
               node.xyz[2] = bgr[2];
               node.index = node_index;
-              node.rcgradient[0] = -(imc - (RefPtImage.cols/2))/BALL_RADIUS_TIGHT;
-              node.rcgradient[1] = -(imr - (RefPtImage.rows/2))/BALL_RADIUS_TIGHT;
+              
+              int im_ori_r = (imr - (RefPtImage.rows/2));
+              int im_ori_c = (imc - (RefPtImage.cols/2));
+              node.rcgradient[1] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_r+1)*(im_ori_r+1)), 0));
+              node.rcgradient[1] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_r*im_ori_r),0));
+              node.rcgradient[0] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_c+1)*(im_ori_c+1)),0));
+              node.rcgradient[0] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_c*im_ori_c),0));
 
               currentTree->insert(node);
 
@@ -355,7 +361,7 @@ int main( int argc, char *argv[] )
                     break;
                   case kUseLookupTable:
                     {
-                      printf("Readying lookup process...");
+                      printf("Readying lookup process...\n");
 
                       RCGradientImageChannels[0].create(RawImageWithBGSmall.rows, RawImageWithBGSmall.cols, CV_32FC1);
                       RCGradientImageChannels[1].create(RawImageWithBGSmall.rows, RawImageWithBGSmall.cols, CV_32FC1);
@@ -376,11 +382,37 @@ int main( int argc, char *argv[] )
                           testNode.xyz[1] = color[1];
                           testNode.xyz[2] = color[2];
 
-                          std::pair<RGBGradOctree::const_iterator,double> found = currentTree->find_nearest(testNode);
-                          rgbToGradientOctNode nearestNode = *found.first;
-                          if (found.second > .2) { // if the match is too far from any reference color take null hypothesis of flat slope
-                            nearestNode.rcgradient[0] = 0.0001;
-                            nearestNode.rcgradient[1] = 0.0001;
+                          //std::pair<RGBGradOctree::const_iterator,double> found = currentTree->find_nearest(testNode);
+                          //rgbToGradientOctNode nearestNode = *found.first;
+
+                          //if (found.second > .2) { // if the match is too far from any reference color take null hypothesis of flat slope
+                          //  nearestNode.rcgradient[0] = 0.0001;
+                          //  nearestNode.rcgradient[1] = 0.0001;
+                          //}
+                          //if (abs(nearestNode.rcgradient[0]) < .1 && abs(nearestNode.rcgradient[1]) < .1) {
+                          //  nearestNode.rcgradient[0] = 0.0001;
+                          //  nearestNode.rcgradient[1] = 0.0001;
+                          //}
+
+                          rgbToGradientOctNode nearestNode;
+                          
+                          double limit = 0.2*1.78;
+                          vector<rgbToGradientOctNode> howClose;
+                          currentTree->find_within_range(testNode,limit,back_insert_iterator<vector<rgbToGradientOctNode> >(howClose));
+                          nearestNode.rcgradient[0] = 0.0001;
+                          nearestNode.rcgradient[1] = 0.0001;
+
+                          double weightTotal = 0;
+                          for (int i=0; i<howClose.size(); ++i) {
+                            double distance = nearestNode.distance(testNode);
+                            double weight = pow(1.0/2.71,distance*distance);
+                            nearestNode.rcgradient[0] += howClose[i].rcgradient[0] * weight;
+                            nearestNode.rcgradient[1] += howClose[i].rcgradient[1] * weight;
+                            weightTotal += weight;
+                          }
+                          if (weightTotal > 0) {
+                            nearestNode.rcgradient[0] /= weightTotal;
+                            nearestNode.rcgradient[1] /= weightTotal;                           
                           }
 
                           // assign gradient to RCGradientImageChannels
@@ -397,9 +429,9 @@ int main( int argc, char *argv[] )
 
                 Mat GradientVisImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC3);
                 Mat GradientVisImageChannels[3];
-                GradientVisImageChannels[0] = RCGradientImageChannels[0];
-                GradientVisImageChannels[1] = RCGradientImageChannels[1];
-                GradientVisImageChannels[2] = 0*RCGradientImageChannels[0]; // Don't need a third channel for this vis
+                GradientVisImageChannels[0] = .75*max(-RCGradientImageChannels[0],0) + .25*max(RCGradientImageChannels[1],0);
+                GradientVisImageChannels[1] = .75*max(RCGradientImageChannels[0],0) + .25*max(RCGradientImageChannels[1],0);
+                GradientVisImageChannels[2] = .75*max(-RCGradientImageChannels[1],0) + .25*max(RCGradientImageChannels[1],0);
                 merge(GradientVisImageChannels, 3, GradientVisImage); // NOT strictly needed; just for vis
 
                 // now use least squares to generate the height map:
@@ -437,12 +469,26 @@ int main( int argc, char *argv[] )
                 for (int u=0; u<RawImageSmall.cols; u++){
                   for (int v=0; v<RawImageSmall.rows; v++){
                     DepthImage.at<float>(v, u) = x(u*RawImageSmall.rows + v);
-                    if (u < 10 && v < 10){
-                      cout << x(u*RawImageSmall.rows + v) << ",";
-                    }
                   }
-                  if (u < 11)
-                    cout << "\n";
+                }
+                // DEBUG prints
+                for (int u=0; u<10; u++){
+                  for (int v=0; v<10; v++){
+                    cout << x(u*RawImageSmall.rows + v) << ",";
+                  }
+                  cout << "\n";
+                }
+                
+                if (save_images){
+                  Mat DepthImageOut;
+                  cv::resize(DepthImage, DepthImageOut, cv::Size(640, 480));
+                  DepthImageOut *= 255.0;
+                  DepthImageOut.convertTo(DepthImageOut, CV_8UC1);
+                  std::ostringstream OutputFilename;
+                  OutputFilename << "outputdepth/img_";
+                  OutputFilename << setfill('0') << setw(7) << OutputImageNum;
+                  OutputFilename << ".jpg";
+                  imwrite(OutputFilename.str(), DepthImageOut);
                 }
 
                 // do some compression
@@ -495,7 +541,6 @@ int main( int argc, char *argv[] )
                   bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                 }
 
-                OutputImageNum++;
                 if (visualize){
                   Mat GradientVisImageBigger;
                   Mat DepthImageBigger;
@@ -503,8 +548,10 @@ int main( int argc, char *argv[] )
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
                   cv::imshow("RawImage", RawImageWithBG);
                   cv::imshow("GradientVisImage", GradientVisImageBigger);
-                  cv::imshow("DepthImage", .25 * DepthImageBigger);
+                  cv::imshow("DepthImage", DepthImageBigger);
                 }
+                
+                OutputImageNum++;
             }
         }
     }
