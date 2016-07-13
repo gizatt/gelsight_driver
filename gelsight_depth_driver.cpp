@@ -40,8 +40,9 @@ using namespace cv;
 
 #define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
+#define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS) // the assumed actual radius of the sphere, as opposed to
+                                                    // the radius of the image it generates.
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
-#define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS)
 #define REF_PT_ROWS 3  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
 #define REF_PT_COLS 4
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )

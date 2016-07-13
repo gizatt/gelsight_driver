@@ -1,10 +1,12 @@
 /****
-Takes several images of a ball bearing pressed into a gelsight and derives
-a space-varying model for inverting normals.
+Takes several images of a ball bearing pressed into a gelsight and
+produces ground-truth depth images based on all the spheres
+detected.
 
 MIT 2016 -- geronm, gizatt
 
-Allows user to specify which aligned ball-image should be used for reference.
+Allows user to specify which aligned ball-image should be used for
+reference. It is assumed that this ball is centered in the image.
 
 Working from this guy's nice starting code to get going
 https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-opencv/
@@ -32,6 +34,7 @@ using namespace ez;
 #define DOT_ERODE_AMT 8  // expands dots a big to get rid of edges
 #define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
+#define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS) // the assumed actual radius of the sphere, as opposed to the radius of the image it generates.
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
 #define REF_PT_ROWS 3  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
 #define REF_PT_COLS 4
@@ -72,8 +75,9 @@ int main(int argc, const char *argv[])
 
   ezOptionParser opt;
 
-  opt.overview = "Takes several images of a ball bearing pressed into a gelsight and derives"
-                 " a space-varying model for inverting normals.";
+  opt.overview = "Takes several images of a ball bearing pressed into a gelsight and"
+                    "produces ground-truth depth images based on all the spheres"
+                    "detected.";
   opt.syntax = "groundtruth_gen [OPTIONS] path_to_video [OPTIONS]";
   opt.example = "groundtruth_gen sphereference/img_%07d.jpg -v 0\n\n";
   opt.footer = "Robot Locomotion Group, geronm and gizatt\n";
@@ -123,7 +127,7 @@ int main(int argc, const char *argv[])
 
   int totalNumArgs = opt.firstArgs.size() + opt.lastArgs.size() + opt.unknownArgs.size();
 
-  if (totalNumArgs != 2) {  // includes prorgram name argument.
+  if (totalNumArgs != 2) {  // includes program name argument.
     std::cerr << "ERROR: Expected 1 argument.\n\n";
     Usage(opt);
     return 1;
@@ -184,6 +188,8 @@ int main(int argc, const char *argv[])
   mkdir("groundtruth/sphereextracted", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   mkdir("groundtruth/spherealigned", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   mkdir("groundtruth/sphererefptimgs", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  mkdir("groundtruth/depth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
 
   ofstream resultsFile;
   resultsFile.open("groundtruth/circle_index.csv");
@@ -406,10 +412,11 @@ int main(int argc, const char *argv[])
                     SphereAligned.rows, SphereAligned.cols);
                 SphereAligned = SphereAligned(alignedSphere);
 
+                // Final check: Did we detect a circle?
                 if (r < CENTER_DIST_THRESHOLD && c < CENTER_DIST_THRESHOLD && r > -CENTER_DIST_THRESHOLD && c > -CENTER_DIST_THRESHOLD) {
                   // If we are here, then that means we have:
                   //  1. detected a circle in the image, and..
-                  //  2. likely successfully aligned said point to the reference image.
+                  //  2. seem to have successfully aligned said point to the reference image.
                   // Thus, SphereAligned can become a reference image to contribute to our lookup tables!
 
                   Point aCenterCorrected(aCenter.x + c, aCenter.y + r);
@@ -418,15 +425,15 @@ int main(int argc, const char *argv[])
                   gt_centers_corrected.push_back(aCenterCorrected);
 
                   // Write out aligned image
-                  std::ostringstream OutputAlignedFilename;
-                  OutputAlignedFilename << "groundtruth/spherealigned/img_";
-                  OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
-                  OutputAlignedFilename << ".jpg";
-                  bool status = imwrite(OutputAlignedFilename.str(), SphereAligned);
-                  if (status) {
-                    printf("success!\n");
-                  } else {
-                    printf("failure.\n");
+                  {
+                    std::ostringstream OutputAlignedFilename;
+                    OutputAlignedFilename << "groundtruth/spherealigned/img_";
+                    OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                    OutputAlignedFilename << ".jpg";
+                    bool status = imwrite(OutputAlignedFilename.str(), SphereAligned);
+                    if (!status) {
+                      printf("Warning: image write failure for path %s\n", OutputAlignedFilename.str().c_str());
+                    }
                   }
                   // Write csv entry for successfully-aligned sphere image to reference images table file
                   resultsFile << OutputImageNum << "," << aCenterCorrected.x << "," << aCenterCorrected.y << std::endl;
@@ -452,7 +459,32 @@ int main(int argc, const char *argv[])
                       referencePointWeights[r][c] += weight;
                     }
                   }
-
+                  
+                  // Output a depth image, under the assumption that the sphere is the only source of depth in the image.
+                  Mat DepthImage(RawImageWithBG.rows, RawImageWithBG.cols, CV_32FC1, Scalar(0)); // Black image
+                  for (int dx = -BALL_RADIUS_TIGHT; dx < BALL_RADIUS_TIGHT; dx++) {
+                    for (int dy = -BALL_RADIUS_TIGHT; dy < BALL_RADIUS_TIGHT; dy++) {
+                      int imrow = aCenterCorrected.y + dy;
+                      int imcol = aCenterCorrected.x + dx;
+                      if (imrow >= 0 && imrow < DepthImage.rows && imcol >= 0 && imcol < DepthImage.cols) {
+                        float normdist = hypot(dx, dy) / BALL_RADIUS_TIGHT;
+                        float height = sqrt(1 - (normdist*normdist));
+                        DepthImage.at<float>(imrow, imcol) = height;
+                      }
+                    }
+                  }
+                  DepthImage *= 255.0;
+                  DepthImage.convertTo(DepthImage, CV_8UC1);
+                  {
+                    std::ostringstream OutputAlignedFilename;
+                    OutputAlignedFilename << "groundtruth/depth/img_";
+                    OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                    OutputAlignedFilename << ".jpg";
+                    bool status = imwrite(OutputAlignedFilename.str(), DepthImage);
+                    if (!status) {
+                      printf("Warning: image write failure for path %s\n", OutputAlignedFilename.str().c_str());
+                    }
+                  }
                 }
               }
             }
