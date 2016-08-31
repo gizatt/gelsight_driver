@@ -88,7 +88,7 @@ int main( int argc, char *argv[] )
     pthread_t lcmThread;
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    VideoCapture capture(0);   // Using -1 tells OpenCV to grab whatever camera is available.
+    VideoCapture capture(1);   // Using -1 tells OpenCV to grab whatever camera is available.
     if(!capture.isOpened()){
         std::cout << "Failed to connect to the camera." << std::endl;
         return(1);

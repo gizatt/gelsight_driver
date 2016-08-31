@@ -68,6 +68,22 @@ void Usage(ezOptionParser& opt) {
   std::cout << usage;
 };
 
+/**
+ * Tests for integer status, the C way (no exceptions involved).
+ *
+ * From: http://stackoverflow.com/questions/2844817/how-do-i-check-if-a-c-string-is-an-int
+ * Accessed: 07/13/2016
+ */
+static inline bool isInteger(const std::string & s)
+{
+   if(s.empty() || ((!isdigit(s[0])) && (s[0] != '-') && (s[0] != '+'))) return false ;
+
+   char * p ;
+   strtol(s.c_str(), &p, 10) ;
+
+   return (*p == 0) ;
+};
+
 int main(int argc, const char *argv[])
 {
 
@@ -208,7 +224,13 @@ int main(int argc, const char *argv[])
     assert(!SphereReference.empty());
   }
 
-  VideoCapture capture(videoSource);  // Using -1 tells OpenCV to grab whatever camera is available.
+  VideoCapture capture;
+  if (isInteger(videoSource)) {
+    char* p;
+    capture.open((int)strtol(videoSource.c_str(), NULL, 10)); // Using -1 would tell OpenCV to grab whatever camera is available.
+  } else {
+    capture.open(videoSource);
+  }
   if(!capture.isOpened()){
       std::cout << "Failed to connect to the camera." << std::endl;
       return(1);
@@ -543,4 +565,5 @@ int main(int argc, const char *argv[])
   //~[back to depth script:] Use libkdtree++ octree to make a nearest-neighbor lookup model to get gradients
 
   return 0;
+
 }
