@@ -205,6 +205,7 @@ int main(int argc, const char *argv[])
   mkdir("groundtruth/spherealigned", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   mkdir("groundtruth/sphererefptimgs", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   mkdir("groundtruth/depth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  mkdir("groundtruth/raw", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
 
   ofstream resultsFile;
@@ -293,6 +294,7 @@ int main(int argc, const char *argv[])
   }
 
   double last_send_time = getUnixTime();
+  int InputImageNum = 1; // because 0 has been read in as background image
   int OutputImageNum = 0;
   vector<Point> gt_centers;
   vector<Point> gt_centers_corrected;
@@ -371,7 +373,7 @@ int main(int argc, const char *argv[])
               {
                 std::ostringstream OutputAlignedFilename;
                 OutputAlignedFilename << "groundtruth/sphereextracted/img_";
-                OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                OutputAlignedFilename << setfill('0') << setw(7) << InputImageNum;
                 OutputAlignedFilename << ".jpg";
                 imwrite(OutputAlignedFilename.str(), SphereExtracted);
               }
@@ -450,7 +452,7 @@ int main(int argc, const char *argv[])
                   {
                     std::ostringstream OutputAlignedFilename;
                     OutputAlignedFilename << "groundtruth/spherealigned/img_";
-                    OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                    OutputAlignedFilename << setfill('0') << setw(7) << InputImageNum;
                     OutputAlignedFilename << ".jpg";
                     bool status = imwrite(OutputAlignedFilename.str(), SphereAligned);
                     if (!status) {
@@ -458,7 +460,7 @@ int main(int argc, const char *argv[])
                     }
                   }
                   // Write csv entry for successfully-aligned sphere image to reference images table file
-                  resultsFile << OutputImageNum << "," << aCenterCorrected.x << "," << aCenterCorrected.y << std::endl;
+                  resultsFile << InputImageNum << "," << aCenterCorrected.x << "," << aCenterCorrected.y << std::endl;
 
                   // Formatting
                   Mat SphereAlignedHighRes;
@@ -507,12 +509,24 @@ int main(int argc, const char *argv[])
                       printf("Warning: image write failure for path %s\n", OutputAlignedFilename.str().c_str());
                     }
                   }
+                  {
+                    std::ostringstream OutputAlignedFilename;
+                    OutputAlignedFilename << "groundtruth/raw/img_";
+                    OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
+                    OutputAlignedFilename << ".jpg";
+                    bool status = imwrite(OutputAlignedFilename.str(), RawImageWithBG);
+                    if (!status) {
+                      printf("Warning: image write failure for path %s\n", OutputAlignedFilename.str().c_str());
+                    }
+                  }
+                  OutputImageNum++;
                 }
               }
             }
           }
 
-          OutputImageNum++;
+          InputImageNum++;
+          
           if (visualize){
             cv::imshow("RawImage", RawImageWithBG);
             cv::imshow("SphereImage", SphereImage);
@@ -530,7 +544,7 @@ int main(int argc, const char *argv[])
       int imcol = REF_GET_IMCOL (c, RawImageWithBG.cols);
 
       // TODO Write csv entry for reference pt sphere image to reference pt images table
-//        resultsFile << OutputImageNum << "," << aCenterCorrected.x << "," << aCenterCorrected.y << std::endl;
+//        resultsFile << InputImageNum << "," << aCenterCorrected.x << "," << aCenterCorrected.y << std::endl;
 
       // renormalize image
       referencePointImgs[r][c] /= referencePointWeights[r][c];

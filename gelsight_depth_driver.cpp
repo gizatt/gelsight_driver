@@ -32,6 +32,10 @@ using namespace cv;
 #define DOT_DILATE_AMT 3 // removes small spurious points
 #define DOT_ERODE_AMT 8 // expands dots a big to get rid of edges
 
+#define BINS_PER_COLOR (16)
+// #define COLOR_TO_BIN(c) ((size_t)(c * BINS_PER_COLOR))
+#define COLOR_TO_BIN(c) ((size_t)((1+((c)*255/256))/2 * BINS_PER_COLOR))
+
 #define FILTER_ROWS 15
 #define FILTER_COLS 15
 #define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
@@ -74,11 +78,11 @@ int main( int argc, char *argv[] )
         return 0;
     }
 
-    enum GradMode { kUseLookupTable, kUseConvFilter, kUseOtherMethod };
+    enum GradMode { kUseLookupOctree, kUseLookupTable, kUseConvFilter, kUseOtherMethod };
 
     bool save_images = atoi(argv[1]);
     bool visualize = atoi(argv[2]);
-    GradMode gradMode = kUseConvFilter;
+    GradMode gradMode = kUseLookupTable; //kUseConvFilter; //kUseLookupOctree; //kUseConvFilter; //
     if (save_images) {
         mkdir("output", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         mkdir("outputdepth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -124,103 +128,143 @@ int main( int argc, char *argv[] )
       startWindowThread();
     }
 
-    // load convolution kernel for converting Gelsight Image to raw image
     Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
-    std::cout << "Loading filters from filter_data/..." << std::endl;
-    for (int c1=0; c1<3; c1++) {
-      for (int c2=0; c2<3; c2++) {
-        char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
-        sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
-        std::fstream myFile(filt_fn, std::ios_base::in);
-
-        float * buf = new float[FILTER_SIZE];
-        unsigned int counter = 0;
-        while (counter < FILTER_SIZE && myFile >> buf[counter]) {
-          printf("%f\n", buf[counter]);
-          counter++;
-        }
-        printf("counter: %d\n", counter);
-        std::cout << filt_fn << std::endl;
-
-        Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
-        flip(tempMat, tempMat, -1);
-        tempMat.copyTo(conv_kernel[2-c1][c2]);
-      }
-    }
-    printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
-    printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
-    printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
-
-
-    // populate octrees for RGB-to-Gradient lookup-based conversion
-    typedef KDTree::KDTree<3,rgbToGradientOctNode> RGBGradOctree;
+    typedef KDTree::KDTree<3,rgbToGradientOctNode> RGBGradOctree; // octree, in case needed
     RGBGradOctree lookupTrees[REF_PT_ROWS*REF_PT_COLS];
-    for (int refr=0; refr<REF_PT_ROWS; refr++) {
-      for (int refc=0; refc<REF_PT_COLS; refc++) {
-        // Load up the (r,c)-reference image
-        Mat RefPtImage;
-        {
-          std::ostringstream ImageFilename;
-          ImageFilename << "groundtruth/sphererefptimgs/img_";
-          ImageFilename << "r" << setfill('0') << setw(4) << refr;
-          ImageFilename << "c" << setfill('0') << setw(4) << refc;
-          ImageFilename << ".jpg";
+    float grad_r_lookup[BINS_PER_COLOR][BINS_PER_COLOR][BINS_PER_COLOR]; // lookup array, in case we are using that
+    float grad_c_lookup[BINS_PER_COLOR][BINS_PER_COLOR][BINS_PER_COLOR];
 
-          RefPtImage = imread(ImageFilename.str());
+    
+    switch (gradMode) {
+      case kUseConvFilter:
+      {
+        // load convolution kernel for converting Gelsight Image to raw image
+        std::cout << "Loading filters from filter_data/..." << std::endl;
+        for (int c1=0; c1<3; c1++) {
+          for (int c2=0; c2<3; c2++) {
+            char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
+            sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
+            std::fstream myFile(filt_fn, std::ios_base::in);
+
+            float * buf = new float[FILTER_SIZE];
+            unsigned int counter = 0;
+            while (counter < FILTER_SIZE && myFile >> buf[counter]) {
+              printf("%f\n", buf[counter]);
+              counter++;
+            }
+            printf("counter: %d\n", counter);
+            std::cout << filt_fn << std::endl;
+
+            Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
+            flip(tempMat, tempMat, -1);
+            tempMat.copyTo(conv_kernel[2-c1][c2]);
+          }
         }
-        RefPtImage.convertTo(RefPtImage, CV_32FC3);
-        RefPtImage /= 255.0;
+        printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
+        printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
+        printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
+      }
+      break;
+      case kUseLookupOctree:
+      {
+        // populate octrees for RGB-to-Gradient lookup-based conversion
+        for (int refr=0; refr<REF_PT_ROWS; refr++) {
+          for (int refc=0; refc<REF_PT_COLS; refc++) {
+            // Load up the (r,c)-reference image
+            Mat RefPtImage;
+            {
+              std::ostringstream ImageFilename;
+              ImageFilename << "groundtruth/sphererefptimgs/img_";
+              ImageFilename << "r" << setfill('0') << setw(4) << refr;
+              ImageFilename << "c" << setfill('0') << setw(4) << refc;
+              ImageFilename << ".jpg";
 
-        RGBGradOctree * currentTree = &(lookupTrees[refr*REF_PT_COLS + refc]);
+              RefPtImage = imread(ImageFilename.str());
+            }
+            RefPtImage.convertTo(RefPtImage, CV_32FC3);
+            RefPtImage /= 255.0;
 
-        int node_index = 0;
-        for (int imr=0; imr<RefPtImage.rows; imr++) {
-          for (int imc=0; imc<RefPtImage.cols; imc++) {
+            RGBGradOctree * currentTree = &(lookupTrees[refr*REF_PT_COLS + refc]);
 
-            double rdist = hypot(imr - (RefPtImage.rows/2), imc - (RefPtImage.cols/2));
-            if (rdist < BALL_RADIUS_TIGHT) { // only take points that we believe are on the surface of the sphere
-              // compute gradients at current imr,imc place them in tree under RGB value
-              Vec3f bgr = RefPtImage.at<Vec3f>(imc,imr);
+            int node_index = 0;
+            for (int imr=0; imr<RefPtImage.rows; imr++) {
+              for (int imc=0; imc<RefPtImage.cols; imc++) {
 
-              rgbToGradientOctNode node;
-              node.xyz[0] = bgr[0];
-              node.xyz[1] = bgr[1];
-              node.xyz[2] = bgr[2];
-              node.index = node_index;
-              
-              int im_ori_r = (imr - (RefPtImage.rows/2));
-              int im_ori_c = (imc - (RefPtImage.cols/2));
-              node.rcgradient[1] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_r+1)*(im_ori_r+1)), 0));
-              node.rcgradient[1] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_r*im_ori_r),0));
-              node.rcgradient[0] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_c+1)*(im_ori_c+1)),0));
-              node.rcgradient[0] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_c*im_ori_c),0));
+                double rdist = hypot(imr - (RefPtImage.rows/2), imc - (RefPtImage.cols/2));
+                if (rdist < BALL_RADIUS_TIGHT) { // only take points that we believe are on the surface of the sphere
+                  // compute gradients at current imr,imc place them in tree under RGB value
+                  Vec3f bgr = RefPtImage.at<Vec3f>(imc,imr);
 
-              currentTree->insert(node);
+                  rgbToGradientOctNode node;
+                  node.xyz[0] = bgr[0];
+                  node.xyz[1] = bgr[1];
+                  node.xyz[2] = bgr[2];
+                  node.index = node_index;
+                  
+                  int im_ori_r = (imr - (RefPtImage.rows/2));
+                  int im_ori_c = (imc - (RefPtImage.cols/2));
+                  node.rcgradient[1] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_r+1)*(im_ori_r+1)), 0));
+                  node.rcgradient[1] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_r*im_ori_r),0));
+                  node.rcgradient[0] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_c+1)*(im_ori_c+1)),0));
+                  node.rcgradient[0] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_c*im_ori_c),0));
 
-              node_index++;
-            } else {
-              Vec3f white(1,1,1);
-              RefPtImage.at<Vec3f>(imc,imr) /= 2;
-              RefPtImage.at<Vec3f>(imc,imr) += .5 * white; //average self with white
+                  currentTree->insert(node);
+
+                  node_index++;
+                } else {
+                  Vec3f white(1,1,1);
+                  RefPtImage.at<Vec3f>(imc,imr) /= 2;
+                  RefPtImage.at<Vec3f>(imc,imr) += .5 * white; //average self with white
+                }
+              }
+            }
+
+            #if DEBUG_SHOW_REF
+            cv::namedWindow("DEBUGRefPtImage", cv::WINDOW_AUTOSIZE);
+            cv::imshow("DEBUGRefPtImage", RefPtImage);
+            {
+              struct timespec tim, tim2;
+              tim.tv_sec = 0;
+              tim.tv_nsec = 050000000L;
+              nanosleep(&tim,&tim2);
+            }
+            cv::imshow("DEBUGRefPtImage", RefPtImage);
+            #endif
+          }
+        }
+      }
+      break;
+      case kUseLookupTable:
+      {
+        // prepare lookup table
+        // Make sure entries can be read properly
+        ifstream table_read_file;
+        table_read_file.open("trained_lookup.dat");
+        if (table_read_file) {
+          for (int i=0; i < BINS_PER_COLOR; i++) {
+            for (int j=0; j < BINS_PER_COLOR; j++) {
+              for (int k=0; k < BINS_PER_COLOR; k++) {
+                float read_float;
+                table_read_file >> read_float;
+                grad_r_lookup[i][j][k] = read_float;
+              }
+            }
+          }
+          for (int i=0; i < BINS_PER_COLOR; i++) {
+            for (int j=0; j < BINS_PER_COLOR; j++) {
+              for (int k=0; k < BINS_PER_COLOR; k++) {
+                float read_float;
+                table_read_file >> read_float;
+                grad_c_lookup[i][j][k] = read_float;
+              }
             }
           }
         }
-
-        #if DEBUG_SHOW_REF
-        cv::namedWindow("DEBUGRefPtImage", cv::WINDOW_AUTOSIZE);
-        cv::imshow("DEBUGRefPtImage", RefPtImage);
-        {
-          struct timespec tim, tim2;
-          tim.tv_sec = 0;
-          tim.tv_nsec = 050000000L;
-          nanosleep(&tim,&tim2);
-        }
-        cv::imshow("DEBUGRefPtImage", RefPtImage);
-        #endif
       }
+      break;
     }
 
-
+    
     // get calibration image immediately
     Mat BGImage;
     capture >> BGImage;
@@ -244,8 +288,8 @@ int main( int argc, char *argv[] )
                                        Point( 1, 1 ) );
 
     // make subsampled version of RawImage
-    unsigned int drows = FILTER_IMROWS;
-    unsigned int dcols = FILTER_IMCOLS;
+    unsigned int drows = 2*FILTER_IMROWS;
+    unsigned int dcols = 2*FILTER_IMCOLS;
     Size dsize(dcols, drows);
     Mat RawImageSmall(drows, dcols, CV_32FC3);
     Mat RawImageWithBGSmall(drows, dcols, CV_32FC3);
@@ -332,7 +376,7 @@ int main( int argc, char *argv[] )
 
                 resize(RawImage, RawImageSmall, dsize);
                 resize(RawImage, RawImageWithBGSmall, dsize);
-                GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
+                // GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
                 // process into subsampled normals image
 
 
@@ -360,7 +404,7 @@ int main( int argc, char *argv[] )
                       RCGradientImageChannels[1] = NormalImageChannels[1];
                     }
                     break;
-                  case kUseLookupTable:
+                  case kUseLookupOctree:
                     {
                       printf("Readying lookup process...\n");
 
@@ -397,7 +441,7 @@ int main( int argc, char *argv[] )
 
                           rgbToGradientOctNode nearestNode;
                           
-                          double limit = 0.2*1.78;
+                          double limit = 0.5; //0.2*1.78;
                           vector<rgbToGradientOctNode> howClose;
                           currentTree->find_within_range(testNode,limit,back_insert_iterator<vector<rgbToGradientOctNode> >(howClose));
                           nearestNode.rcgradient[0] = 0.0001;
@@ -419,6 +463,27 @@ int main( int argc, char *argv[] )
                           // assign gradient to RCGradientImageChannels
                           RCGradientImageChannels[0].at<float>(imr,imc) = nearestNode.rcgradient[0];
                           RCGradientImageChannels[1].at<float>(imr,imc) = nearestNode.rcgradient[1];
+                        }
+                      }
+                    }
+                    break;
+                  case kUseLookupTable:
+                    {
+                      printf("Readying lookup process...\n");
+
+                      RCGradientImageChannels[0].create(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+                      RCGradientImageChannels[1].create(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+
+                      for (int i=0; i<RawImageSmall.rows - 1; i++) {
+                        for (int j=0; j<RawImageSmall.cols - 1; j++) {
+                          Vec3f rawColor = RawImageSmall.at<Vec3f>(i,j);
+                          
+                          size_t r = COLOR_TO_BIN(rawColor[0]);
+                          size_t g = COLOR_TO_BIN(rawColor[1]);
+                          size_t b = COLOR_TO_BIN(rawColor[2]);
+                          
+                          RCGradientImageChannels[0].at<float>(i,j) = BALL_RADIUS_TIGHT*grad_r_lookup[r][g][b];
+                          RCGradientImageChannels[1].at<float>(i,j) = BALL_RADIUS_TIGHT*grad_c_lookup[r][g][b];
                         }
                       }
                     }
@@ -556,5 +621,8 @@ int main( int argc, char *argv[] )
             }
         }
     }
+    
+    capture.release();
+    
     return 0;
 }
