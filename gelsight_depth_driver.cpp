@@ -2,7 +2,11 @@
 Copies images from a webcam and broadcasts them to LCM
 leveraging OpenCV's nice webcam drivers.
 
-MIT Hyperloop 2016 -- gizatt
+MIT 2016 -- gizatt
+
+Parameters:
+  - gradient gain - scale factor on gradients in lookup table
+  - edge gain - weight in Least Squares solve given to keeping the depth map near zero around the border
 
 I'm working from this guy's nice starting code to get going
 https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-opencv/
@@ -73,6 +77,9 @@ static double getUnixTime(void)
 
 int main( int argc, char *argv[] )
 {
+    const float edge_gain = 1.0;
+    const float grad_gain = 2.0;
+
     if (argc != 3){
         printf("Usage: gelsight_depth_driver <save images to ./output?> <visualize?>\n");
         return 0;
@@ -92,7 +99,7 @@ int main( int argc, char *argv[] )
     pthread_t lcmThread;
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    VideoCapture capture(1);   // Using -1 tells OpenCV to grab whatever camera is available.
+    VideoCapture capture(1);  // If you use -1, that tells OpenCV to grab whatever camera is available.
     if(!capture.isOpened()){
         std::cout << "Failed to connect to the camera." << std::endl;
         return(1);
@@ -122,6 +129,7 @@ int main( int argc, char *argv[] )
     }
 
     if (visualize){
+      namedWindow( "BGImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
       namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
@@ -265,27 +273,8 @@ int main( int argc, char *argv[] )
     }
 
     
-    // get calibration image immediately
+    // get calibration image on first frame
     Mat BGImage;
-    capture >> BGImage;
-    BGImage.convertTo(BGImage, CV_32FC3);
-    BGImage /= 255.0;
-
-    Mat BGDotsMap;
-    cvtColor(BGImage, BGDotsMap, CV_RGB2GRAY);
-    cv::threshold(BGDotsMap, BGDotsMap, DOT_THRESHOLD, 1.0, CV_THRESH_BINARY);
-    Mat dilateElement = getStructuringElement( MORPH_RECT,
-                                       Size( 2*DOT_DILATE_AMT + 1, 2*DOT_DILATE_AMT+1 ),
-                                       Point( DOT_DILATE_AMT, DOT_DILATE_AMT ) );
-    Mat erodeElement = getStructuringElement( MORPH_RECT,
-                                       Size( 2*DOT_ERODE_AMT + 1, 2*DOT_ERODE_AMT+1 ),
-                                       Point( DOT_ERODE_AMT, DOT_ERODE_AMT ) );
-    dilate(BGDotsMap, BGDotsMap, dilateElement);
-    erode(BGDotsMap, BGDotsMap, erodeElement);
-
-    Mat elementOne = getStructuringElement( MORPH_RECT,
-                                       Size( 2 + 1, 2+1 ),
-                                       Point( 1, 1 ) );
 
     // make subsampled version of RawImage
     unsigned int drows = 2*FILTER_IMROWS;
@@ -319,16 +308,16 @@ int main( int argc, char *argv[] )
 
     // borders -- left and right border
     for (int i=0; i<RawImageSmall.rows; i++){
-      A_coeffs.push_back(T(a_row, i, 1));
+      A_coeffs.push_back(T(a_row, i, edge_gain));
       a_row++;
-      A_coeffs.push_back(T(a_row, (RawImageSmall.cols-1)*RawImageSmall.rows + i, 1));
+      A_coeffs.push_back(T(a_row, (RawImageSmall.cols-1)*RawImageSmall.rows + i, edge_gain));
       a_row++;
     }
     // borders -- top and bottom border
     for (int i=0; i<RawImageSmall.cols; i++){
-      A_coeffs.push_back(T(a_row, i*RawImageSmall.rows + 0, 1));
+      A_coeffs.push_back(T(a_row, i*RawImageSmall.rows + 0, edge_gain));
       a_row++;
-      A_coeffs.push_back(T(a_row, (i+1)*RawImageSmall.rows - 1, 1));
+      A_coeffs.push_back(T(a_row, (i+1)*RawImageSmall.rows - 1, edge_gain));
       a_row++;
     }
     Eigen::SparseMatrix<float> A(a_row, RawImageSmall.rows * RawImageSmall.cols);
@@ -345,15 +334,19 @@ int main( int argc, char *argv[] )
 
     double last_send_time = getUnixTime();
     int OutputImageNum = 0;
-    while (1) {
+    int NumFramesToShow = -1;  // NumFrames > 0 allows camera to be released; < 0 is infinite
+    while (OutputImageNum != NumFramesToShow) {
         // wasteful but lower latency.
         Mat RawImage;
         Mat RawImageWithBG;
         capture >> RawImageWithBG;
         if (getUnixTime() - last_send_time > 0.0333){
             last_send_time = getUnixTime();
-            if(!RawImageWithBG.empty())
-            {
+            if(!RawImageWithBG.empty() && BGImage.empty()) {
+              RawImageWithBG.convertTo(RawImageWithBG, CV_32FC3);
+              RawImageWithBG /= 255.0;
+              RawImageWithBG.copyTo(BGImage);
+            } else if (!RawImageWithBG.empty()) {
                 if (save_images){
                     std::ostringstream OutputFilename;
                     OutputFilename << "output/img_";
@@ -366,13 +359,6 @@ int main( int argc, char *argv[] )
                 RawImageWithBG.copyTo(RawImage);
 
                 RawImage -= BGImage;
-
-
-                Mat RawImageDotsMap;
-                cvtColor(RawImage, RawImageDotsMap, CV_RGB2GRAY);
-                cv::threshold(RawImageDotsMap, RawImageDotsMap, DOT_THRESHOLD, 1.0, CV_THRESH_BINARY);
-                dilate(RawImageDotsMap, RawImageDotsMap, dilateElement);
-                erode(RawImageDotsMap, RawImageDotsMap, erodeElement);
 
                 resize(RawImage, RawImageSmall, dsize);
                 resize(RawImage, RawImageWithBGSmall, dsize);
@@ -474,16 +460,16 @@ int main( int argc, char *argv[] )
                       RCGradientImageChannels[0].create(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
                       RCGradientImageChannels[1].create(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
 
-                      for (int i=0; i<RawImageSmall.rows - 1; i++) {
-                        for (int j=0; j<RawImageSmall.cols - 1; j++) {
+                      for (int i=0; i<RawImageSmall.rows; i++) {
+                        for (int j=0; j<RawImageSmall.cols; j++) {
                           Vec3f rawColor = RawImageSmall.at<Vec3f>(i,j);
                           
                           size_t r = COLOR_TO_BIN(rawColor[0]);
                           size_t g = COLOR_TO_BIN(rawColor[1]);
                           size_t b = COLOR_TO_BIN(rawColor[2]);
                           
-                          RCGradientImageChannels[0].at<float>(i,j) = BALL_RADIUS_TIGHT*grad_r_lookup[r][g][b];
-                          RCGradientImageChannels[1].at<float>(i,j) = BALL_RADIUS_TIGHT*grad_c_lookup[r][g][b];
+                          RCGradientImageChannels[0].at<float>(i,j) = grad_gain*grad_r_lookup[r][g][b];
+                          RCGradientImageChannels[1].at<float>(i,j) = grad_gain*grad_c_lookup[r][g][b];
                         }
                       }
                     }
@@ -613,8 +599,9 @@ int main( int argc, char *argv[] )
                   cv::resize(GradientVisImage, GradientVisImageBigger, cv::Size(640, 480));
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
                   cv::imshow("RawImage", RawImageWithBG);
-                  cv::imshow("GradientVisImage", GradientVisImageBigger);
+                  cv::imshow("GradientVisImage", 5*GradientVisImageBigger);
                   cv::imshow("DepthImage", DepthImageBigger);
+                  cv::imshow("BGImage", BGImage);
                 }
                 
                 OutputImageNum++;
