@@ -91,8 +91,8 @@ int main(int argc, const char *argv[])
 
   ezOptionParser opt;
 
-  opt.overview = "Takes several images of a ball bearing pressed into a gelsight and"
-                    "produces ground-truth depth images based on all the spheres"
+  opt.overview = "Takes several images of a ball bearing pressed into a gelsight and "
+                    "produces ground-truth depth images based on all the spheres "
                     "detected.";
   opt.syntax = "groundtruth_gen [OPTIONS] path_to_video [OPTIONS]";
   opt.example = "groundtruth_gen sphereference/img_%07d.jpg -v 0\n\n";

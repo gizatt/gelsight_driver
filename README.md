@@ -20,7 +20,7 @@ first record the footage you will be using, eg. by running
 
         ./build/gelsight_depth_driver [ARGS]
 
-  with the appropriate argumentss so that it records all footage to some
+  with the appropriate arguments so that it records all footage to some
   output folder.
 
 2. Next, run the groundtruth generator on these image:

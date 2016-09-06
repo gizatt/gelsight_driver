@@ -30,7 +30,7 @@ using namespace cv;
 using namespace ez;
 
 #define REQ_NUM_ARGS (3)
-#define BINS_PER_COLOR (16)
+#define BINS_PER_COLOR (12)
 // #define COLOR_TO_BIN(c) ((size_t)(c * BINS_PER_COLOR))
 #define COLOR_TO_BIN(c) ((size_t)((1+((c)*255/256))/2 * BINS_PER_COLOR))
 
