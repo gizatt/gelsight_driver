@@ -108,7 +108,7 @@ int main( int argc, const char *argv[] )
     bool live_camera;
 
     const float edge_gain = 1.0;
-    const float grad_gain = 2.0;
+    const float grad_gain = 1.0;
 
     // Input argument parsing stuff:
 
@@ -710,12 +710,12 @@ int main( int argc, const char *argv[] )
                 if (save_images){
                   Mat DepthImageOut;
                   cv::resize(DepthImage, DepthImageOut, cv::Size(640, 480));
-                  DepthImageOut *= 255.0;
-                  DepthImageOut.convertTo(DepthImageOut, CV_8UC1);
+                  DepthImageOut *= 65535.0;
+                  DepthImageOut.convertTo(DepthImageOut, CV_16UC1);
                   std::ostringstream OutputFilename;
                   OutputFilename << "outputdepth/img_";
                   OutputFilename << setfill('0') << setw(7) << OutputImageNum;
-                  OutputFilename << ".jpg";
+                  OutputFilename << ".png";
                   imwrite(OutputFilename.str(), DepthImageOut);
                 }
 

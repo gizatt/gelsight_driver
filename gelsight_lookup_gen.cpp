@@ -92,9 +92,10 @@ int main(int argc, const char *argv[])
 
   ezOptionParser opt;
 
-  opt.overview = "Takes ground truth data and resultant images and "
+  opt.overview = "Takes ground truth data (16-bit 1-channel) and corresponding "
+                    " Gelsight images (8-bit 3-channel) and "
                     "produces a lookup table mapping RGB -> Gradient. ";
-  opt.syntax = "lookup_gen [OPTIONS] path_to_gt_folder/img_%07d.jpg path_to_image_folder/img_%07d.jpg background_image.jpg [OPTIONS]";
+  opt.syntax = "lookup_gen [OPTIONS] path_to_gt_folder/img_%07d.png path_to_image_folder/img_%07d.jpg background_image.jpg [OPTIONS]";
   opt.example = "lookup_gen groundtruth/depth groundtruth/raw\n\n";
   opt.footer = "Robot Locomotion Group, geronm and gizatt\n";
 
@@ -219,7 +220,7 @@ int main(int argc, const char *argv[])
   captureGt >> GtImage;
   
   if ((RawImage.empty() || GtImage.empty())) {
-    printf("Error: Input images streams empty.");
+    printf("Error: Input images stream empty.");
     return 1;
   }
   
@@ -227,7 +228,7 @@ int main(int argc, const char *argv[])
     RawImage.convertTo(RawImage, CV_32FC3);
     RawImage /= 255.0;
     RawImage = RawImage - BgImage;
-    GtImage.convertTo(GtImage, CV_32FC3);
+    GtImage.convertTo(GtImage, CV_32FC1);
     GtImage /= 255.0;
     // At this point, we have a depth image stored in GtImage and
     // a Gelsight observed image stored in RawImage. Their pixels

@@ -497,13 +497,13 @@ int main(int argc, const char *argv[])
                       }
                     }
                   }
-                  DepthImage *= 255.0;
-                  DepthImage.convertTo(DepthImage, CV_8UC1);
+                  DepthImage *= 65535.0;
+                  DepthImage.convertTo(DepthImage, CV_16UC1);
                   {
                     std::ostringstream OutputAlignedFilename;
                     OutputAlignedFilename << "groundtruth/depth/img_";
                     OutputAlignedFilename << setfill('0') << setw(7) << OutputImageNum;
-                    OutputAlignedFilename << ".jpg";
+                    OutputAlignedFilename << ".png";
                     bool status = imwrite(OutputAlignedFilename.str(), DepthImage);
                     if (!status) {
                       printf("Warning: image write failure for path %s\n", OutputAlignedFilename.str().c_str());
