@@ -228,7 +228,7 @@ int main(int argc, const char *argv[])
       // a Gelsight observed image stored in ReconImage. Their pixels
       // should correspond. Thus, we can loop over these pixels and
       // add them as entries into the gradient->RGB lookup table.
-      double MSE = 0;
+      double ME = 0;
       int count = 0;
       
       float reconMaxDepth = 0;
@@ -257,7 +257,7 @@ int main(int argc, const char *argv[])
 
             histogram[ERROR_TO_HIST_BIN(error)] += 1;
             
-            MSE += (error > 0) ? error : -error ; //error*error;
+            ME += (error > 0) ? error : -error ; //error*error;
             count += 1;
           }
           
@@ -270,13 +270,13 @@ int main(int argc, const char *argv[])
         }
       }
       
-      MSE /= count;
+      ME /= count;
       
-      double RMSE = MSE; //sqrt(MSE);
+      double RME = ME; //sqrt(ME);
       for (int i=0; i<HIST_BINS-1; i++)
         table_file << histogram[i] << " ";
       table_file << HIST_BINS-1 << "\n";
-      table_file << RMSE << "\n";
+      table_file << RME << "\n";
       
       printf("  recon max: %f\n", reconMaxDepth);
       printf("  gt max: %f\n", gtMaxDepth);

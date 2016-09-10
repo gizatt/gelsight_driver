@@ -110,7 +110,7 @@ int main( int argc, const char *argv[] )
     string background_string;
 
     const float edge_gain = 1.0;
-    const float grad_gain = 4.0/3.0; // 6.0/5.0; //1.0;
+    const float grad_gain = 10.0/3.0; // 6.0/5.0; //1.0;
 
     // Input argument parsing stuff:
 
@@ -465,8 +465,8 @@ int main( int argc, const char *argv[] )
     }
 
     // make subsampled version of RawImage
-    unsigned int drows = 5*FILTER_IMROWS;
-    unsigned int dcols = 5*FILTER_IMCOLS;
+    unsigned int drows = 2*FILTER_IMROWS;
+    unsigned int dcols = 2*FILTER_IMCOLS;
     Size dsize(dcols, drows);
     Mat RawImageSmall(drows, dcols, CV_32FC3);
     Mat RawImageWithBGSmall(drows, dcols, CV_32FC3);
