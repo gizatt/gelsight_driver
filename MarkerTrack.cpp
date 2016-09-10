@@ -133,21 +133,6 @@ void MarkerTrack::ParaIni(const CaptureFrm& input)
     maxarea--;
 }
 
-// greg: needed because my machine has too old a version of opencv
-static void arrowedLine(CV_IN_OUT Mat& img, Point pt1, Point pt2, const Scalar& color,
-int thickness=1, int line_type=8, int shift=0, double tipLength=0.1)
-{
-    const double tipSize = norm(pt1-pt2)*tipLength; // Factor to normalize the size of the tip depending on the length of the arrow
-    line(img, pt1, pt2, color, thickness, line_type, shift);
-    const double angle = atan2( (double) pt1.y - pt2.y, (double) pt1.x - pt2.x );
-    Point p(cvRound(pt2.x + tipSize * cos(angle + CV_PI / 4)),
-    cvRound(pt2.y + tipSize * sin(angle + CV_PI / 4)));
-    line(img, p, pt2, color, thickness, line_type, shift);
-    p.x = cvRound(pt2.x + tipSize * cos(angle - CV_PI / 4));
-    p.y = cvRound(pt2.y + tipSize * sin(angle - CV_PI / 4));
-    line(img, p, pt2, color, thickness, line_type, shift);
-}
-
 void MarkerTrack::QuiverDisplayField(Mat& Frame)
 {
     if(!MotionCaled) return;
