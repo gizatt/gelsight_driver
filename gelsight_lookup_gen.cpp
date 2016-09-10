@@ -30,7 +30,7 @@ using namespace cv;
 using namespace ez;
 
 #define REQ_NUM_ARGS (3)
-#define BINS_PER_COLOR (12)
+#define BINS_PER_COLOR (16)
 // #define COLOR_TO_BIN(c) ((size_t)(c * BINS_PER_COLOR))
 #define COLOR_TO_BIN(c) ((size_t)((1+((c)*255/256))/2 * BINS_PER_COLOR))
 
@@ -95,8 +95,8 @@ int main(int argc, const char *argv[])
   opt.overview = "Takes ground truth data (16-bit 1-channel) and corresponding "
                     " Gelsight images (8-bit 3-channel) and "
                     "produces a lookup table mapping RGB -> Gradient. ";
-  opt.syntax = "lookup_gen [OPTIONS] path_to_gt_folder/img_%07d.png path_to_image_folder/img_%07d.jpg background_image.jpg [OPTIONS]";
-  opt.example = "lookup_gen groundtruth/depth groundtruth/raw\n\n";
+  opt.syntax = "lookup_gen [OPTIONS] source1 source2 [OPTIONS]";
+  opt.example = "lookup_gen [OPTIONS] path_to_gt_folder/img_%07d.png path_to_image_folder/img_%07d.jpg background_image.jpg [OPTIONS]\n\n";
   opt.footer = "Robot Locomotion Group, geronm and gizatt\n";
 
   opt.add(
@@ -179,11 +179,6 @@ int main(int argc, const char *argv[])
 
   // Third non-option argument is background image.
   string bgImageName = allArgs[3];
-
-  string refFramePath = "";
-  if (opt.isSet("-r")) {
-    opt.get("-r")->getString(refFramePath);
-  }
 
   bool visualize = true;
   if (opt.isSet("-v")) {

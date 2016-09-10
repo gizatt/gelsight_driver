@@ -38,7 +38,7 @@ using namespace ez;
 #define DOT_DILATE_AMT 3 // removes small spurious points
 #define DOT_ERODE_AMT 8 // expands dots a big to get rid of edges
 
-#define BINS_PER_COLOR (12)
+#define BINS_PER_COLOR (16)
 // #define COLOR_TO_BIN(c) ((size_t)(c * BINS_PER_COLOR))
 #define COLOR_TO_BIN(c) ((size_t)((1+((c)*255/256))/2 * BINS_PER_COLOR))
 #define COLOR_TO_BIN_IMAGE(c) ((1+((c)*255/256))/2 * BINS_PER_COLOR)
@@ -106,9 +106,11 @@ int main( int argc, const char *argv[] )
     bool save_images;
     bool visualize;
     bool live_camera;
+    bool background_set;
+    string background_string;
 
     const float edge_gain = 1.0;
-    const float grad_gain = 1.0;
+    const float grad_gain = 4.0/3.0; // 6.0/5.0; //1.0;
 
     // Input argument parsing stuff:
 
@@ -158,6 +160,17 @@ int main( int argc, const char *argv[] )
       "Visualize (\"0\" or \"1\").", // Help description.
       "-v",     // Flag token.
       "--visualization" // Flag token.
+    );
+
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Path to an image to use as the background image (for subtraction)."
+      " If omitted, the first frame will be used as the background.", // Help description.
+      "-b",     // Flag token.
+      "--background-image" // Flag token.
     );
 
     opt.parse(argc, argv);
@@ -217,6 +230,13 @@ int main( int argc, const char *argv[] )
       int boolAsNum = 1;
       opt.get("-o")->getInt(boolAsNum);
       save_images = (boolAsNum != 0);
+    }
+
+    background_set = false;
+    background_string = "";
+    if (opt.isSet("-b")) {
+      background_set = true;
+      opt.get("-b")->getString(background_string);
     }
 
     visualize = true;
@@ -430,8 +450,19 @@ int main( int argc, const char *argv[] )
       break;
     }
 
-    // get calibration image on first frame
+    // calibration image; read if provided, otherwise use first frame
     Mat BGImage;
+    if (background_set) {
+      assert(BGImage.empty());
+
+      printf("Reading in background image...\n");
+
+      BGImage = imread(background_string.c_str());
+      BGImage.convertTo(BGImage, CV_32FC3);
+      BGImage /= 255.0;
+
+      assert(!BGImage.empty());
+    }
 
     // make subsampled version of RawImage
     unsigned int drows = 5*FILTER_IMROWS;
@@ -491,7 +522,7 @@ int main( int argc, const char *argv[] )
 
     double last_send_time = getUnixTime();
     int OutputImageNum = 0;
-    int NumFramesToShow = 300;  // NumFrames > 0 allows camera to be released; < 0 is infinite
+    int NumFramesToShow = 3000;  // NumFrames > 0 allows camera to be released; < 0 is infinite
     while (OutputImageNum != NumFramesToShow) {
         // wasteful but lower latency.
         Mat RawImage;
@@ -506,10 +537,37 @@ int main( int argc, const char *argv[] )
             // capture.retrieve(RawImageWithBG, 3);
             last_send_time = getUnixTime();
             if(!RawImageWithBG.empty() && BGImage.empty()) {
+              // acquire the background on the first image. This necessarily
+              // implies an all-zero heightmap, so we output this.
+              printf("Grabbing first frame for background...\n");
+
+              if (save_images){
+                    std::ostringstream OutputFilename;
+                    OutputFilename << "output/img_";
+                    OutputFilename << setfill('0') << setw(7) << OutputImageNum;
+                    OutputFilename << ".jpg";
+                    imwrite(OutputFilename.str(), RawImageWithBG);
+              }
+
               RawImageWithBG.convertTo(RawImageWithBG, CV_32FC3);
               RawImageWithBG /= 255.0;
               RawImageWithBG.copyTo(BGImage);
-            } else if (!RawImageWithBG.empty()) {
+
+              if (save_images){
+                  Mat DepthImageOut;
+                  RawImageWithBG.copyTo(DepthImageOut);
+                  DepthImageOut *= 0.0;
+                  DepthImageOut.convertTo(DepthImageOut, CV_16UC1);
+                  std::ostringstream OutputFilename;
+                  OutputFilename << "outputdepth/img_";
+                  OutputFilename << setfill('0') << setw(7) << OutputImageNum;
+                  OutputFilename << ".png";
+                  imwrite(OutputFilename.str(), DepthImageOut);
+                }
+
+                background_set = true;
+                OutputImageNum++;
+            } else if (!RawImageWithBG.empty() && !BGImage.empty()) {
                 if (save_images){
                     std::ostringstream OutputFilename;
                     OutputFilename << "output/img_";
@@ -620,12 +678,12 @@ int main( int argc, const char *argv[] )
                     {
                       printf("Readying lookup process...\n");
 
-                      RCGradientImageChannels[0].create(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
-                      RCGradientImageChannels[1].create(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
+                      RCGradientImageChannels[0].create(RawImage.rows, RawImage.cols, CV_32FC1);
+                      RCGradientImageChannels[1].create(RawImage.rows, RawImage.cols, CV_32FC1);
 
-                      for (int i=0; i<RawImageSmall.rows; i++) {
-                        for (int j=0; j<RawImageSmall.cols; j++) {
-                          Vec3f rawColor = RawImageSmall.at<Vec3f>(i,j);
+                      for (int i=0; i<RawImage.rows; i++) {
+                        for (int j=0; j<RawImage.cols; j++) {
+                          Vec3f rawColor = RawImage.at<Vec3f>(i,j);
 
                           size_t c0 = COLOR_TO_BIN(rawColor[0]);
                           size_t c1 = COLOR_TO_BIN(rawColor[1]);
@@ -635,9 +693,9 @@ int main( int argc, const char *argv[] )
                         }
                       }
 
-                      for (int i=0; i<RawImageSmall.rows; i++) {
-                        for (int j=0; j<RawImageSmall.cols; j++) {
-                          Vec3f rawColor = RawImageSmall.at<Vec3f>(i,j);
+                      for (int i=0; i<RawImage.rows; i++) {
+                        for (int j=0; j<RawImage.cols; j++) {
+                          Vec3f rawColor = RawImage.at<Vec3f>(i,j);
 
                           size_t c0 = COLOR_TO_BIN(rawColor[0]);
                           size_t c1 = COLOR_TO_BIN(rawColor[1]);
@@ -646,6 +704,9 @@ int main( int argc, const char *argv[] )
                           RCGradientImageChannels[1].at<float>(i,j) = grad_gain*grad_c_lookup[COLOR_TO_INDEX(c0,c1,c2)];
                         }
                       }
+
+                      cv::resize(RCGradientImageChannels[0], RCGradientImageChannels[0], cv::Size(RawImageSmall.cols, RawImageSmall.rows));
+                      cv::resize(RCGradientImageChannels[1], RCGradientImageChannels[1], cv::Size(RawImageSmall.cols, RawImageSmall.rows));
                     }
                     break;
                   default:
@@ -685,11 +746,12 @@ int main( int argc, const char *argv[] )
                 // and we set zero so the borders are taken care of
                 printf("constructed, solving...\n");
                 // aaaaand done
-
+/*
                 if (isnan(x(0)))
                   x = solver.solve(b);
                 else
                   x = solver.solveWithGuess(b, x);
+                */ x = solver.solve(b);
 
                 printf("solved\n");
 
