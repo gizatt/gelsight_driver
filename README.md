@@ -6,7 +6,7 @@ Sandbox for drivers and experimental code for interface with Gelsight,
 for use with Robot Locomotion Group research.
 
 Dependencies: Roughly working OpenHumanoids reposities, plus
-```sudo apt-get install xawtv```, which containts a command-line tool
+```sudo apt-get install xawtv v4l-utils```, which containts command-line tools
 for changing exposure values on the gelsight.
 
 
