@@ -22,7 +22,7 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <math.h>
 
 
-#include "../eigen/Eigen/IterativeLinearSolvers" // for least squares solving
+#include "Eigen/IterativeLinearSolvers" // for least squares solving
 #include "lib/libkdtree/kdtree++/kdtree.hpp" //
 #include "rgbToGradientOctNode.hpp"          // for rgb octree
 #include <sys/stat.h> // mkdir
