@@ -7,6 +7,8 @@ LIB_OBJS = $(addprefix $(BUILD_DIR)/, CaptureFrm.o MarkerTrack.o VideoRecord.o W
 
 CFLAGS_DRIVER += `pkg-config --cflags opencv lcm bot2-core eigen3`
 LIBS_DRIVER += `pkg-config --libs opencv lcm bot2-core eigen3`
+LIBS_DRIVER += -lGL -lGLU -lglut
+
 
 CFLAGS_CAPTUREFRM += `pkg-config --cflags opencv`
 
