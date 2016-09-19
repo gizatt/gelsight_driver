@@ -108,6 +108,7 @@ int main( int argc, const char *argv[] )
     bool live_camera;
     bool background_set;
     string background_string;
+    string lookup_table_string;
 
     const float edge_gain = 1.0;
     const float grad_gain = 10.0/3.0; // 6.0/5.0; //1.0;
@@ -160,6 +161,16 @@ int main( int argc, const char *argv[] )
       "Visualize (\"0\" or \"1\").", // Help description.
       "-v",     // Flag token.
       "--visualization" // Flag token.
+    );
+
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Path to file containing lookup table (eg. \"/home/stuff/trained_lookup.dat\".", // Help description.
+      "-l",     // Flag token.
+      "--lookup-table" // Flag token.
     );
 
     opt.add(
@@ -246,6 +257,11 @@ int main( int argc, const char *argv[] )
       visualize = (boolAsNum != 0);
     }
 
+    lookup_table_string = "trained_lookup.dat";
+    if (opt.isSet("-l")) {
+      opt.get("-l")->getString(lookup_table_string);
+    }
+
     live_camera = false;
     VideoCapture capture;
     if (isInteger(videoSource)) {
@@ -307,10 +323,10 @@ int main( int argc, const char *argv[] )
     }
 
     if (visualize){
-      namedWindow( "BGImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "BGImage", cv::WINDOW_NORMAL );
+      namedWindow( "RawImage", cv::WINDOW_NORMAL );
+      namedWindow( "GradientVisImage", cv::WINDOW_NORMAL );
+      namedWindow( "DepthImage", cv::WINDOW_NORMAL );
       startWindowThread();
     }
 
@@ -425,7 +441,7 @@ int main( int argc, const char *argv[] )
         // prepare lookup table
         // Make sure entries can be read properly
         ifstream table_read_file;
-        table_read_file.open("trained_lookup.dat");
+        table_read_file.open(lookup_table_string.c_str());
         if (table_read_file) {
           for (int i=0; i < BINS_PER_COLOR; i++) {
             for (int j=0; j < BINS_PER_COLOR; j++) {
@@ -522,7 +538,7 @@ int main( int argc, const char *argv[] )
 
     double last_send_time = getUnixTime();
     int OutputImageNum = 0;
-    int NumFramesToShow = 3000;  // NumFrames > 0 allows camera to be released; < 0 is infinite
+    int NumFramesToShow = -1;  // NumFrames > 0 allows camera to be released; < 0 is infinite
     while (OutputImageNum != NumFramesToShow) {
         // wasteful but lower latency.
         Mat RawImage;
