@@ -1,3 +1,6 @@
 [submodule "lib/libkdtree"]
 	path = lib/libkdtree
 	url = git://git.debian.org/git/libkdtree/libkdtree.git
+[submodule "lib/glfw"]
+	path = lib/glfw
+	url = https://github.com/glfw/glfw
