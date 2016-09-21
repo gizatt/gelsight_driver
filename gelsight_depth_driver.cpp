@@ -598,7 +598,7 @@ int main( int argc, const char *argv[] )
                 RawImage -= BGImage;
 
                 resize(RawImage, RawImageSmall, dsize);
-                resize(RawImage, RawImageWithBGSmall, dsize);
+                resize(RawImageWithBG, RawImageWithBGSmall, dsize);
                 // GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
                 // process into subsampled normals image
 
@@ -798,53 +798,49 @@ int main( int argc, const char *argv[] )
                 }
 
                 // do some compression
-                vector<uchar> buf;
-                Mat DepthImageEnc;
-                DepthImage.copyTo(DepthImageEnc);
-                DepthImageEnc *= 255.0;
-                DepthImageEnc.convertTo(DepthImageEnc, CV_8UC1);
-                bool success = imencode(".jpg", DepthImageEnc, buf);
-                if (success){
-                  // LCM encode and publish contact image
-                  bot_core_image_t imagemsg;
-                  imagemsg.utime = getUnixTime() * 1000 * 1000;
-                  imagemsg.width = DepthImage.cols;
-                  imagemsg.height = DepthImage.rows;
-                  imagemsg.row_stride = 0;
-                  imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                  imagemsg.size = sizeof(uchar) * buf.size();
-                  imagemsg.data = &buf[0];
-                  imagemsg.nmetadata = 0;
-                  bot_core_image_t_publish(lcm, "GELSIGHT_DEPTH", &imagemsg);
+                {
+                  vector<uchar> buf;
+                  Mat DepthImageEnc;
+                  DepthImage.copyTo(DepthImageEnc);
+                  DepthImageEnc *= 255.0;
+                  DepthImageEnc.convertTo(DepthImageEnc, CV_8UC1);
+                  bool success = imencode(".jpg", DepthImageEnc, buf);
+                  if (success){
+                    // LCM encode and publish contact image
+                    bot_core_image_t imagemsg;
+                    imagemsg.utime = getUnixTime() * 1000 * 1000;
+                    imagemsg.width = DepthImage.cols;
+                    imagemsg.height = DepthImage.rows;
+                    imagemsg.row_stride = 0;
+                    imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                    imagemsg.size = sizeof(uchar) * buf.size();
+                    imagemsg.data = &buf[0];
+                    imagemsg.nmetadata = 0;
+                    bot_core_image_t_publish(lcm, "GELSIGHT_DEPTH", &imagemsg);
+                  }
                 }
 
-                // LCM encode and publish raw rgb array
-                Mat RawImageEnc;
-                RawImage.copyTo(RawImageEnc);
+                // do some compression
                 {
-                  int scale = 4;
-                  int width = (RawImageEnc.cols/scale);
-                  int height = (RawImageEnc.rows/scale);
-
-                  uint8_t img_values[width*height*3];
-                  for (int i=0; i<height; i++) {
-                    for (int j=0; j<width; j++) {
-                      Vec3f color = RawImageEnc.at<Vec3f>(i*scale,j*scale);
-                      img_values[(i*width + j)*3 + 0] = 125.0*color[2]; //B
-                      img_values[(i*width + j)*3 + 1] = 125.0*color[1]; //G
-                      img_values[(i*width + j)*3 + 2] = 125.0*color[0]; //R
-                    }
+                  vector<uchar> buf;
+                  Mat RawImageWithBGEnc;
+                  RawImageWithBGSmall.copyTo(RawImageWithBGEnc);
+                  RawImageWithBGEnc *= 255.0;
+                  RawImageWithBGEnc.convertTo(RawImageWithBGEnc, CV_8UC3);
+                  bool success = imencode(".jpg", RawImageWithBGEnc, buf);
+                  if (success){
+                    // LCM encode and publish contact image
+                    bot_core_image_t imagemsg;
+                    imagemsg.utime = getUnixTime() * 1000 * 1000;
+                    imagemsg.width = RawImageWithBG.cols;
+                    imagemsg.height = RawImageWithBG.rows;
+                    imagemsg.row_stride = 0;
+                    imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                    imagemsg.size = sizeof(uchar) * buf.size();
+                    imagemsg.data = &buf[0];
+                    imagemsg.nmetadata = 0;
+                    bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                   }
-                  bot_core_image_t imagemsg;
-                  imagemsg.utime = getUnixTime() * 1000 * 1000;
-                  imagemsg.width = width;
-                  imagemsg.height = height;
-                  imagemsg.row_stride = height;
-                  imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                  imagemsg.size = width*height*3;
-                  imagemsg.data = &(img_values[0]);
-                  imagemsg.nmetadata = 0;
-                  bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                 }
 
                 if (visualize){
