@@ -10,7 +10,7 @@ LIBS_DRIVER += `pkg-config --libs opencv lcm bot2-core eigen3`
 
 CFLAGS_CAPTUREFRM += `pkg-config --cflags opencv`
 
-all: prepare $(LIB_OBJS) $(BUILD_DIR)/main $(BUILD_DIR)/gelsight_depth_driver $(BUILD_DIR)/groundtruth_gen $(BUILD_DIR)/sphere_groundtruth_gen $(BUILD_DIR)/lookup_gen $(BUILD_DIR)/compare_heightmaps
+all: prepare $(LIB_OBJS) $(BUILD_DIR)/main $(BUILD_DIR)/gelsight_depth_driver $(BUILD_DIR)/groundtruth_gen $(BUILD_DIR)/sphere_groundtruth_gen $(BUILD_DIR)/lookup_gen $(BUILD_DIR)/compare_heightmaps $(BUILD_DIR)/gelsight_raw_vis
 
 $(BUILD_DIR)/main: $(LIB_OBJS) main.cpp
 	g++ -O2 $(CFLAGS_MAIN) $(INCLUDES_MAIN) main.cpp $(LIB_OBJS) $(LIBS_MAIN)  -o $@
@@ -29,6 +29,9 @@ $(BUILD_DIR)/lookup_gen: gelsight_lookup_gen.cpp
 
 $(BUILD_DIR)/compare_heightmaps: gelsight_compare_heightmaps.cpp
 	g++ -O2 $(CFLAGS_DRIVER) $(INCLUDES_DRIVER) gelsight_compare_heightmaps.cpp $(LIBS_DRIVER) -o $@
+
+$(BUILD_DIR)/gelsight_raw_vis: gelsight_raw_vis.cpp
+	g++ -O2 $(CFLAGS_DRIVER) $(INCLUDES_DRIVER) gelsight_raw_vis.cpp $(LIBS_DRIVER) -o $@
 
 $(BUILD_DIR)/%.o: %.cpp
 	g++ -O2 -c $(CFLAGS_CAPTUREFRM) $(INCLUDES) $< -o $@
