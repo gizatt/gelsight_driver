@@ -2,7 +2,11 @@
 Copies images from a webcam and broadcasts them to LCM
 leveraging OpenCV's nice webcam drivers.
 
-MIT Hyperloop 2016 -- gizatt
+MIT 2016 -- gizatt
+
+Parameters:
+  - gradient gain - scale factor on gradients in lookup table
+  - edge gain - weight in Least Squares solve given to keeping the depth map near zero around the border
 
 I'm working from this guy's nice starting code to get going
 https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-opencv/
@@ -18,19 +22,27 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <math.h>
 
 
-#include "../eigen/Eigen/IterativeLinearSolvers" // for least squares solving
+#include "Eigen/IterativeLinearSolvers" // for least squares solving
 #include "lib/libkdtree/kdtree++/kdtree.hpp" //
 #include "rgbToGradientOctNode.hpp"          // for rgb octree
 #include <sys/stat.h> // mkdir
+#include "lib/ezOptionParser/ezOptionParser.hpp"
 
 #include <lcmtypes/bot_core_image_t.h>
 
 using namespace std;
 using namespace cv;
+using namespace ez;
 
 #define DOT_THRESHOLD 0.05
 #define DOT_DILATE_AMT 3 // removes small spurious points
 #define DOT_ERODE_AMT 8 // expands dots a big to get rid of edges
+
+#define BINS_PER_COLOR (16)
+// #define COLOR_TO_BIN(c) ((size_t)(c * BINS_PER_COLOR))
+#define COLOR_TO_BIN(c) ((size_t)((1+((c)*255/256))/2 * BINS_PER_COLOR))
+#define COLOR_TO_BIN_IMAGE(c) ((1+((c)*255/256))/2 * BINS_PER_COLOR)
+#define COLOR_TO_INDEX(c0,c1,c2) ((c0)*BINS_PER_COLOR*BINS_PER_COLOR + (c1)*BINS_PER_COLOR + (c2))
 
 #define FILTER_ROWS 15
 #define FILTER_COLS 15
@@ -40,8 +52,9 @@ using namespace cv;
 
 #define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
+#define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS) // the assumed actual radius of the sphere, as opposed to
+                                                    // the radius of the image it generates.
 #define SNAPSHOT_WIDTH (2*BALL_RADIUS_GUESS_MARGIN)
-#define BALL_RADIUS_TIGHT (.85 * BALL_RADIUS_GUESS)
 #define REF_PT_ROWS 3  // grid resolution of final lookup table (how many lookup locations there are) TODO: CL argument
 #define REF_PT_COLS 4
 #define REF_GET_IMROW(ptrow, imrows) ( ((1+(ptrow)) * (imrows)) / (1+REF_PT_ROWS) )
@@ -66,18 +79,207 @@ static double getUnixTime(void)
     return (tv.tv_sec + (tv.tv_nsec / 1000000000.0));
 }
 
-int main( int argc, char *argv[] )
+void Usage(ezOptionParser& opt) {
+  std::string usage;
+  opt.getUsage(usage);
+  std::cout << usage;
+};
+
+/**
+ * Tests for integer status, the C way (no exceptions involved).
+ *
+ * From: http://stackoverflow.com/questions/2844817/how-do-i-check-if-a-c-string-is-an-int
+ * Accessed: 07/13/2016
+ */
+static inline bool isInteger(const std::string & s)
 {
-    if (argc != 3){
-        printf("Usage: gelsight_depth_driver <save images to ./output?> <visualize?>\n");
-        return 0;
+   if(s.empty() || ((!isdigit(s[0])) && (s[0] != '-') && (s[0] != '+'))) return false ;
+
+   char * p ;
+   strtol(s.c_str(), &p, 10) ;
+
+   return (*p == 0) ;
+};
+
+int main( int argc, const char *argv[] )
+{
+    bool save_images;
+    bool visualize;
+    bool live_camera;
+    bool background_set;
+    string background_string;
+    string lookup_table_string;
+
+    const float edge_gain = 1.0;
+    const float grad_gain = 10.0/3.0; // 6.0/5.0; //1.0;
+
+    // Input argument parsing stuff:
+
+    ezOptionParser opt;
+
+    opt.overview = "Accepts an imput source of Gelsight images and produces "
+                   "heightmaps from the images, publishing them to LCM and "
+                   "optionally writing them to disk (writes raw images to "
+                   "\"output\" and depth images to \"outputdepth\").\n\n"
+
+                  "  video_source - If an integer is provided, this will be "
+                    "treated as a camera source (eg. for Linux: \"1\" -> \"/dev/video1\"); "
+                    "otherwise, treated as a path to a contiguous set of "
+                    "numbered images (eg. \"myimages/img_%07d.jpg\")."; // Help description.
+    opt.syntax = "gelsight_depth_driver [OPTIONS] video_source [OPTIONS]";
+    opt.example = "gelsight_depth_driver 1 -v 0 -o 1    # Grab frames from camera 1, no vis, "
+                                                             "write output files\n\n";
+    opt.footer = "Robot Locomotion Group, geronm and gizatt\n";
+
+    opt.add(
+      "", // Default.
+      0, // Required?
+      0, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Display usage instructions.", // Help description.
+      "-h",     // Flag token.
+      "-help",  // Flag token.
+      "--help", // Flag token.
+      "--usage" // Flag token.
+    );
+
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Output folder, into which to write files (in default case, no files written).", // Help description.
+      "-o",     // Flag token.
+      "--output" // Flag token.
+    );
+
+    opt.add(
+      "1", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Visualize (\"0\" or \"1\").", // Help description.
+      "-v",     // Flag token.
+      "--visualization" // Flag token.
+    );
+
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Path to file containing lookup table (eg. \"/home/stuff/trained_lookup.dat\".", // Help description.
+      "-l",     // Flag token.
+      "--lookup-table" // Flag token.
+    );
+
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Path to an image to use as the background image (for subtraction)."
+      " If omitted, the first frame will be used as the background.", // Help description.
+      "-b",     // Flag token.
+      "--background-image" // Flag token.
+    );
+
+    opt.parse(argc, argv);
+
+    if (opt.isSet("-h")) {
+      Usage(opt);
+      return 1;
     }
 
-    enum GradMode { kUseLookupTable, kUseConvFilter, kUseOtherMethod };
+    int totalNumArgs = opt.firstArgs.size() + opt.lastArgs.size() + opt.unknownArgs.size();
 
-    bool save_images = atoi(argv[1]);
-    bool visualize = atoi(argv[2]);
-    GradMode gradMode = kUseConvFilter;
+    if (totalNumArgs != 2) {  // includes program name argument.
+      std::cerr << "ERROR: Expected 1 argument.\n\n";
+      Usage(opt);
+      return 1;
+    }
+
+    // Check for bad options
+    {
+      vector<string> badOptions;
+      int i;
+      if(!opt.gotRequired(badOptions)) {
+        for(i=0; i < badOptions.size(); ++i)
+          std::cerr << "ERROR: Missing required option " << badOptions[i] << ".\n\n";
+        Usage(opt);
+        return 1;
+      }
+
+      if(!opt.gotExpected(badOptions)) {
+        for(i=0; i < badOptions.size(); ++i)
+          std::cerr << "ERROR: Got unexpected number of arguments for option " << badOptions[i] << ".\n\n";
+
+        Usage(opt);
+        return 1;
+      }
+    }
+
+    // Make vector of non-option arguments (script can take them interleaved with options).
+    vector<string> allArgs;
+    for (int i=0; i<opt.firstArgs.size(); i++) {
+      allArgs.push_back(*(opt.firstArgs[i]));
+    }
+    for (int i=0; i<opt.unknownArgs.size(); i++) {
+      allArgs.push_back(*(opt.unknownArgs[i]));
+    }
+    for (int i=0; i<opt.lastArgs.size(); i++) {
+      allArgs.push_back(*(opt.lastArgs[i]));
+    }
+
+    assert(allArgs.size() == totalNumArgs);
+
+    // First non-option argument is source of video.
+    string videoSource = allArgs[1];
+
+    save_images = true;
+    if (opt.isSet("-o")) {
+      int boolAsNum = 1;
+      opt.get("-o")->getInt(boolAsNum);
+      save_images = (boolAsNum != 0);
+    }
+
+    background_set = false;
+    background_string = "";
+    if (opt.isSet("-b")) {
+      background_set = true;
+      opt.get("-b")->getString(background_string);
+    }
+
+    visualize = true;
+    if (opt.isSet("-v")) {
+      int boolAsNum = 1;
+      opt.get("-v")->getInt(boolAsNum);
+      visualize = (boolAsNum != 0);
+    }
+
+    lookup_table_string = "trained_lookup.dat";
+    if (opt.isSet("-l")) {
+      opt.get("-l")->getString(lookup_table_string);
+    }
+
+    live_camera = false;
+    VideoCapture capture;
+    if (isInteger(videoSource)) {
+      char* p;
+      capture.open((int)strtol(videoSource.c_str(), NULL, 10)); // Using -1 would tell OpenCV to grab whatever camera is available.
+      live_camera = true;
+    } else {
+      capture.open(videoSource);
+    }
+
+    if(!capture.isOpened()){
+        std::cout << "Failed to connect to the camera." << std::endl;
+        return(1);
+    }
+
+    enum GradMode { kUseLookupOctree, kUseLookupTable, kUseConvFilter, kUseOtherMethod };
+
+    GradMode gradMode = kUseLookupTable; //kUseConvFilter; //kUseLookupOctree; //kUseConvFilter; //
     if (save_images) {
         mkdir("output", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         mkdir("outputdepth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -87,164 +289,200 @@ int main( int argc, char *argv[] )
     pthread_t lcmThread;
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    VideoCapture capture(0);   // Using -1 tells OpenCV to grab whatever camera is available.
-    if(!capture.isOpened()){
-        std::cout << "Failed to connect to the camera." << std::endl;
-        return(1);
-    }
+    capture.set(CV_CAP_PROP_BUFFERSIZE, 2); // Small software buffer
     capture.set(CV_CAP_PROP_FRAME_WIDTH,640);
     capture.set(CV_CAP_PROP_FRAME_HEIGHT,480);
 
-    Mat temp_image; capture >> temp_image; // warm up capture
+    if (live_camera) {
+      // if we're using a live camera, need to clear
+      // buffer and set exposure
 
-    //capture.set(CV_CAP_PROP_EXPOSURE, -2);
-    // use a command line tool to do this instead:
-    char buf[300];
-    int ret = 1;
-    int vidi=0;
-    // in case we're not on video0, loop through...
+      Mat temp_image; // TODO: Move to after options change!
+      for (int i=0; i<10; i++) {
+        capture >> temp_image; // warm up capture
+      }
 
-    struct timespec tim, tim2; // use awkward c convention to
-    tim.tv_sec = 0;            // set up half-second duration
-    tim.tv_nsec = 250000000L;
+      //capture.set(CV_CAP_PROP_EXPOSURE, -2);
+      // use a command line tool to do this instead:
+      char buf[300];
+      int ret = 1;
+      int vidi=0;
+      // in case we're not on video0, loop through...
 
-    while (ret != 0){
-      nanosleep(&tim, &tim2);
-      sprintf(buf, "v4l2-ctl --device=/dev/video%d --set-ctrl=white_balance_temperature_auto=0,backlight_compensation=0,exposure_auto=1,exposure_absolute=30,exposure_auto_priority=0,gain=50", vidi);
-      printf("Trying %s\n", buf);
-      ret = system(buf);
-      vidi++;
+      struct timespec tim, tim2; // use awkward c convention to
+      tim.tv_sec = 0;            // set up half-second duration
+      tim.tv_nsec = 250000000L;
+
+      while (ret != 0){
+        nanosleep(&tim, &tim2);
+        sprintf(buf, "v4l2-ctl --device=/dev/video%d --set-ctrl=white_balance_temperature_auto=0,backlight_compensation=0,exposure_auto=1,exposure_absolute=30,exposure_auto_priority=0,gain=50", vidi);
+        printf("Trying %s\n", buf);
+        ret = system(buf);
+        vidi++;
+      }
     }
 
     if (visualize){
-      namedWindow( "RawImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "GradientVisImage", cv::WINDOW_AUTOSIZE );
-      namedWindow( "DepthImage", cv::WINDOW_AUTOSIZE );
+      namedWindow( "BGImage", cv::WINDOW_NORMAL );
+      namedWindow( "RawImage", cv::WINDOW_NORMAL );
+      namedWindow( "GradientVisImage", cv::WINDOW_NORMAL );
+      namedWindow( "DepthImage", cv::WINDOW_NORMAL );
       startWindowThread();
     }
 
-    // load convolution kernel for converting Gelsight Image to raw image
     Mat conv_kernel[3][3]; // conv_kernel[c1][c2] is kernel for mapping channel c1 to channel c2
-    std::cout << "Loading filters from filter_data/..." << std::endl;
-    for (int c1=0; c1<3; c1++) {
-      for (int c2=0; c2<3; c2++) {
-        char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
-        sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
-        std::fstream myFile(filt_fn, std::ios_base::in);
-
-        float * buf = new float[FILTER_SIZE];
-        unsigned int counter = 0;
-        while (counter < FILTER_SIZE && myFile >> buf[counter]) {
-          printf("%f\n", buf[counter]);
-          counter++;
-        }
-        printf("counter: %d\n", counter);
-        std::cout << filt_fn << std::endl;
-
-        Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
-        flip(tempMat, tempMat, -1);
-        tempMat.copyTo(conv_kernel[2-c1][c2]);
-      }
-    }
-    printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
-    printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
-    printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
-
-
-    // populate octrees for RGB-to-Gradient lookup-based conversion
-    typedef KDTree::KDTree<3,rgbToGradientOctNode> RGBGradOctree;
+    typedef KDTree::KDTree<3,rgbToGradientOctNode> RGBGradOctree; // octree, in case needed
     RGBGradOctree lookupTrees[REF_PT_ROWS*REF_PT_COLS];
-    for (int refr=0; refr<REF_PT_ROWS; refr++) {
-      for (int refc=0; refc<REF_PT_COLS; refc++) {
-        // Load up the (r,c)-reference image
-        Mat RefPtImage;
-        {
-          std::ostringstream ImageFilename;
-          ImageFilename << "groundtruth/sphererefptimgs/img_";
-          ImageFilename << "r" << setfill('0') << setw(4) << refr;
-          ImageFilename << "c" << setfill('0') << setw(4) << refc;
-          ImageFilename << ".jpg";
+    float grad_r_lookup[BINS_PER_COLOR*BINS_PER_COLOR*BINS_PER_COLOR]; // lookup array, in case we are using that
+    float grad_c_lookup[BINS_PER_COLOR*BINS_PER_COLOR*BINS_PER_COLOR];
 
-          RefPtImage = imread(ImageFilename.str());
+
+    switch (gradMode) {
+      case kUseConvFilter:
+      {
+        // load convolution kernel for converting Gelsight Image to raw image
+        std::cout << "Loading filters from filter_data/..." << std::endl;
+        for (int c1=0; c1<3; c1++) {
+          for (int c2=0; c2<3; c2++) {
+            char filt_fn[26]; // |"filter_data/filter_XX.txt"|=13 chars, + '\0'
+            sprintf(filt_fn, "filter_data/filter_%01d%01d.txt", c1, c2);
+            std::fstream myFile(filt_fn, std::ios_base::in);
+
+            float * buf = new float[FILTER_SIZE];
+            unsigned int counter = 0;
+            while (counter < FILTER_SIZE && myFile >> buf[counter]) {
+              printf("%f\n", buf[counter]);
+              counter++;
+            }
+            printf("counter: %d\n", counter);
+            std::cout << filt_fn << std::endl;
+
+            Mat tempMat(FILTER_ROWS, FILTER_COLS, CV_32FC1, buf);
+            flip(tempMat, tempMat, -1);
+            tempMat.copyTo(conv_kernel[2-c1][c2]);
+          }
         }
-        RefPtImage.convertTo(RefPtImage, CV_32FC3);
-        RefPtImage /= 255.0;
+        printf("%f, %f, %f\n",conv_kernel[2][2].at<float>(0,0),conv_kernel[2][2].at<float>(0,1),conv_kernel[2][2].at<float>(1,0));
+        printf("%f, %f, %f\n",conv_kernel[0][0].at<float>(0,0),conv_kernel[0][0].at<float>(0,1),conv_kernel[0][0].at<float>(1,0));
+        printf("%f, %f, %f\n",conv_kernel[1][1].at<float>(0,0),conv_kernel[1][1].at<float>(0,1),conv_kernel[1][1].at<float>(1,0));
+      }
+      break;
+      case kUseLookupOctree:
+      {
+        // populate octrees for RGB-to-Gradient lookup-based conversion
+        for (int refr=0; refr<REF_PT_ROWS; refr++) {
+          for (int refc=0; refc<REF_PT_COLS; refc++) {
+            // Load up the (r,c)-reference image
+            Mat RefPtImage;
+            {
+              std::ostringstream ImageFilename;
+              ImageFilename << "groundtruth/sphererefptimgs/img_";
+              ImageFilename << "r" << setfill('0') << setw(4) << refr;
+              ImageFilename << "c" << setfill('0') << setw(4) << refc;
+              ImageFilename << ".jpg";
 
-        RGBGradOctree * currentTree = &(lookupTrees[refr*REF_PT_COLS + refc]);
+              RefPtImage = imread(ImageFilename.str());
+            }
+            RefPtImage.convertTo(RefPtImage, CV_32FC3);
+            RefPtImage /= 255.0;
 
-        int node_index = 0;
-        for (int imr=0; imr<RefPtImage.rows; imr++) {
-          for (int imc=0; imc<RefPtImage.cols; imc++) {
+            RGBGradOctree * currentTree = &(lookupTrees[refr*REF_PT_COLS + refc]);
 
-            double rdist = hypot(imr - (RefPtImage.rows/2), imc - (RefPtImage.cols/2));
-            if (rdist < BALL_RADIUS_TIGHT) { // only take points that we believe are on the surface of the sphere
-              // compute gradients at current imr,imc place them in tree under RGB value
-              Vec3f bgr = RefPtImage.at<Vec3f>(imc,imr);
+            int node_index = 0;
+            for (int imr=0; imr<RefPtImage.rows; imr++) {
+              for (int imc=0; imc<RefPtImage.cols; imc++) {
 
-              rgbToGradientOctNode node;
-              node.xyz[0] = bgr[0];
-              node.xyz[1] = bgr[1];
-              node.xyz[2] = bgr[2];
-              node.index = node_index;
-              
-              int im_ori_r = (imr - (RefPtImage.rows/2));
-              int im_ori_c = (imc - (RefPtImage.cols/2));
-              node.rcgradient[1] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_r+1)*(im_ori_r+1)), 0));
-              node.rcgradient[1] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_r*im_ori_r),0));
-              node.rcgradient[0] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_c+1)*(im_ori_c+1)),0));
-              node.rcgradient[0] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_c*im_ori_c),0));
+                double rdist = hypot(imr - (RefPtImage.rows/2), imc - (RefPtImage.cols/2));
+                if (rdist < BALL_RADIUS_TIGHT) { // only take points that we believe are on the surface of the sphere
+                  // compute gradients at current imr,imc place them in tree under RGB value
+                  Vec3f bgr = RefPtImage.at<Vec3f>(imc,imr);
 
-              currentTree->insert(node);
+                  rgbToGradientOctNode node;
+                  node.xyz[0] = bgr[0];
+                  node.xyz[1] = bgr[1];
+                  node.xyz[2] = bgr[2];
+                  node.index = node_index;
 
-              node_index++;
-            } else {
-              Vec3f white(1,1,1);
-              RefPtImage.at<Vec3f>(imc,imr) /= 2;
-              RefPtImage.at<Vec3f>(imc,imr) += .5 * white; //average self with white
+                  int im_ori_r = (imr - (RefPtImage.rows/2));
+                  int im_ori_c = (imc - (RefPtImage.cols/2));
+                  node.rcgradient[1] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_r+1)*(im_ori_r+1)), 0));
+                  node.rcgradient[1] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_r*im_ori_r),0));
+                  node.rcgradient[0] = sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - ((im_ori_c+1)*(im_ori_c+1)),0));
+                  node.rcgradient[0] -= sqrt(MACRO_MAX(BALL_RADIUS_TIGHT*BALL_RADIUS_TIGHT - (im_ori_c*im_ori_c),0));
+
+                  currentTree->insert(node);
+
+                  node_index++;
+                } else {
+                  Vec3f white(1,1,1);
+                  RefPtImage.at<Vec3f>(imc,imr) /= 2;
+                  RefPtImage.at<Vec3f>(imc,imr) += .5 * white; //average self with white
+                }
+              }
+            }
+
+            #if DEBUG_SHOW_REF
+            cv::namedWindow("DEBUGRefPtImage", cv::WINDOW_AUTOSIZE);
+            cv::imshow("DEBUGRefPtImage", RefPtImage);
+            {
+              struct timespec tim, tim2;
+              tim.tv_sec = 0;
+              tim.tv_nsec = 050000000L;
+              nanosleep(&tim,&tim2);
+            }
+            cv::imshow("DEBUGRefPtImage", RefPtImage);
+            #endif
+          }
+        }
+      }
+      break;
+      case kUseLookupTable:
+      {
+        // prepare lookup table
+        // Make sure entries can be read properly
+        ifstream table_read_file;
+        table_read_file.open(lookup_table_string.c_str());
+        if (table_read_file) {
+          for (int i=0; i < BINS_PER_COLOR; i++) {
+            for (int j=0; j < BINS_PER_COLOR; j++) {
+              for (int k=0; k < BINS_PER_COLOR; k++) {
+                float read_float;
+                table_read_file >> read_float;
+                grad_r_lookup[COLOR_TO_INDEX(i,j,k)] = read_float;
+              }
+            }
+          }
+          for (int i=0; i < BINS_PER_COLOR; i++) {
+            for (int j=0; j < BINS_PER_COLOR; j++) {
+              for (int k=0; k < BINS_PER_COLOR; k++) {
+                float read_float;
+                table_read_file >> read_float;
+                grad_c_lookup[COLOR_TO_INDEX(i,j,k)] = read_float;
+              }
             }
           }
         }
-
-        #if DEBUG_SHOW_REF
-        cv::namedWindow("DEBUGRefPtImage", cv::WINDOW_AUTOSIZE);
-        cv::imshow("DEBUGRefPtImage", RefPtImage);
-        {
-          struct timespec tim, tim2;
-          tim.tv_sec = 0;
-          tim.tv_nsec = 050000000L;
-          nanosleep(&tim,&tim2);
-        }
-        cv::imshow("DEBUGRefPtImage", RefPtImage);
-        #endif
       }
+      break;
     }
 
-
-    // get calibration image immediately
+    // calibration image; read if provided, otherwise use first frame
     Mat BGImage;
-    capture >> BGImage;
-    BGImage.convertTo(BGImage, CV_32FC3);
-    BGImage /= 255.0;
+    if (background_set) {
+      assert(BGImage.empty());
 
-    Mat BGDotsMap;
-    cvtColor(BGImage, BGDotsMap, CV_RGB2GRAY);
-    cv::threshold(BGDotsMap, BGDotsMap, DOT_THRESHOLD, 1.0, CV_THRESH_BINARY);
-    Mat dilateElement = getStructuringElement( MORPH_RECT,
-                                       Size( 2*DOT_DILATE_AMT + 1, 2*DOT_DILATE_AMT+1 ),
-                                       Point( DOT_DILATE_AMT, DOT_DILATE_AMT ) );
-    Mat erodeElement = getStructuringElement( MORPH_RECT,
-                                       Size( 2*DOT_ERODE_AMT + 1, 2*DOT_ERODE_AMT+1 ),
-                                       Point( DOT_ERODE_AMT, DOT_ERODE_AMT ) );
-    dilate(BGDotsMap, BGDotsMap, dilateElement);
-    erode(BGDotsMap, BGDotsMap, erodeElement);
+      printf("Reading in background image...\n");
 
-    Mat elementOne = getStructuringElement( MORPH_RECT,
-                                       Size( 2 + 1, 2+1 ),
-                                       Point( 1, 1 ) );
+      BGImage = imread(background_string.c_str());
+      BGImage.convertTo(BGImage, CV_32FC3);
+      BGImage /= 255.0;
+
+      assert(!BGImage.empty());
+    }
 
     // make subsampled version of RawImage
-    unsigned int drows = FILTER_IMROWS;
-    unsigned int dcols = FILTER_IMCOLS;
+    unsigned int drows = 2*FILTER_IMROWS;
+    unsigned int dcols = 2*FILTER_IMCOLS;
     Size dsize(dcols, drows);
     Mat RawImageSmall(drows, dcols, CV_32FC3);
     Mat RawImageWithBGSmall(drows, dcols, CV_32FC3);
@@ -274,16 +512,16 @@ int main( int argc, char *argv[] )
 
     // borders -- left and right border
     for (int i=0; i<RawImageSmall.rows; i++){
-      A_coeffs.push_back(T(a_row, i, 1));
+      A_coeffs.push_back(T(a_row, i, edge_gain));
       a_row++;
-      A_coeffs.push_back(T(a_row, (RawImageSmall.cols-1)*RawImageSmall.rows + i, 1));
+      A_coeffs.push_back(T(a_row, (RawImageSmall.cols-1)*RawImageSmall.rows + i, edge_gain));
       a_row++;
     }
     // borders -- top and bottom border
     for (int i=0; i<RawImageSmall.cols; i++){
-      A_coeffs.push_back(T(a_row, i*RawImageSmall.rows + 0, 1));
+      A_coeffs.push_back(T(a_row, i*RawImageSmall.rows + 0, edge_gain));
       a_row++;
-      A_coeffs.push_back(T(a_row, (i+1)*RawImageSmall.rows - 1, 1));
+      A_coeffs.push_back(T(a_row, (i+1)*RawImageSmall.rows - 1, edge_gain));
       a_row++;
     }
     Eigen::SparseMatrix<float> A(a_row, RawImageSmall.rows * RawImageSmall.cols);
@@ -300,15 +538,52 @@ int main( int argc, char *argv[] )
 
     double last_send_time = getUnixTime();
     int OutputImageNum = 0;
-    while (1) {
+    int NumFramesToShow = -1;  // NumFrames > 0 allows camera to be released; < 0 is infinite
+    while (OutputImageNum != NumFramesToShow) {
         // wasteful but lower latency.
         Mat RawImage;
         Mat RawImageWithBG;
-        capture >> RawImageWithBG;
-        if (getUnixTime() - last_send_time > 0.0333){
+
+        // in case of live camera, reduce latency via buffer depletion
+        if (live_camera) {
+          capture.grab();
+        }
+        if (getUnixTime() - last_send_time > 0.03){ //033){
+            capture >> RawImageWithBG;
+            // capture.retrieve(RawImageWithBG, 3);
             last_send_time = getUnixTime();
-            if(!RawImageWithBG.empty())
-            {
+            if(!RawImageWithBG.empty() && BGImage.empty()) {
+              // acquire the background on the first image. This necessarily
+              // implies an all-zero heightmap, so we output this.
+              printf("Grabbing first frame for background...\n");
+
+              if (save_images){
+                    std::ostringstream OutputFilename;
+                    OutputFilename << "output/img_";
+                    OutputFilename << setfill('0') << setw(7) << OutputImageNum;
+                    OutputFilename << ".jpg";
+                    imwrite(OutputFilename.str(), RawImageWithBG);
+              }
+
+              RawImageWithBG.convertTo(RawImageWithBG, CV_32FC3);
+              RawImageWithBG /= 255.0;
+              RawImageWithBG.copyTo(BGImage);
+
+              if (save_images){
+                  Mat DepthImageOut;
+                  RawImageWithBG.copyTo(DepthImageOut);
+                  DepthImageOut *= 0.0;
+                  DepthImageOut.convertTo(DepthImageOut, CV_16UC1);
+                  std::ostringstream OutputFilename;
+                  OutputFilename << "outputdepth/img_";
+                  OutputFilename << setfill('0') << setw(7) << OutputImageNum;
+                  OutputFilename << ".png";
+                  imwrite(OutputFilename.str(), DepthImageOut);
+                }
+
+                background_set = true;
+                OutputImageNum++;
+            } else if (!RawImageWithBG.empty() && !BGImage.empty()) {
                 if (save_images){
                     std::ostringstream OutputFilename;
                     OutputFilename << "output/img_";
@@ -322,16 +597,9 @@ int main( int argc, char *argv[] )
 
                 RawImage -= BGImage;
 
-
-                Mat RawImageDotsMap;
-                cvtColor(RawImage, RawImageDotsMap, CV_RGB2GRAY);
-                cv::threshold(RawImageDotsMap, RawImageDotsMap, DOT_THRESHOLD, 1.0, CV_THRESH_BINARY);
-                dilate(RawImageDotsMap, RawImageDotsMap, dilateElement);
-                erode(RawImageDotsMap, RawImageDotsMap, erodeElement);
-
                 resize(RawImage, RawImageSmall, dsize);
-                resize(RawImage, RawImageWithBGSmall, dsize);
-                GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
+                resize(RawImageWithBG, RawImageWithBGSmall, dsize);
+                // GaussianBlur(RawImageSmall,RawImageSmall,Size(19,19),1.0);
                 // process into subsampled normals image
 
 
@@ -359,7 +627,7 @@ int main( int argc, char *argv[] )
                       RCGradientImageChannels[1] = NormalImageChannels[1];
                     }
                     break;
-                  case kUseLookupTable:
+                  case kUseLookupOctree:
                     {
                       printf("Readying lookup process...\n");
 
@@ -395,8 +663,8 @@ int main( int argc, char *argv[] )
                           //}
 
                           rgbToGradientOctNode nearestNode;
-                          
-                          double limit = 0.2*1.78;
+
+                          double limit = 0.5; //0.2*1.78;
                           vector<rgbToGradientOctNode> howClose;
                           currentTree->find_within_range(testNode,limit,back_insert_iterator<vector<rgbToGradientOctNode> >(howClose));
                           nearestNode.rcgradient[0] = 0.0001;
@@ -420,6 +688,41 @@ int main( int argc, char *argv[] )
                           RCGradientImageChannels[1].at<float>(imr,imc) = nearestNode.rcgradient[1];
                         }
                       }
+                    }
+                    break;
+                  case kUseLookupTable:
+                    {
+                      printf("Readying lookup process...\n");
+
+                      RCGradientImageChannels[0].create(RawImage.rows, RawImage.cols, CV_32FC1);
+                      RCGradientImageChannels[1].create(RawImage.rows, RawImage.cols, CV_32FC1);
+
+                      for (int i=0; i<RawImage.rows; i++) {
+                        for (int j=0; j<RawImage.cols; j++) {
+                          Vec3f rawColor = RawImage.at<Vec3f>(i,j);
+
+                          size_t c0 = COLOR_TO_BIN(rawColor[0]);
+                          size_t c1 = COLOR_TO_BIN(rawColor[1]);
+                          size_t c2 = COLOR_TO_BIN(rawColor[2]);
+
+                          RCGradientImageChannels[0].at<float>(i,j) = grad_gain*grad_r_lookup[COLOR_TO_INDEX(c0,c1,c2)];
+                        }
+                      }
+
+                      for (int i=0; i<RawImage.rows; i++) {
+                        for (int j=0; j<RawImage.cols; j++) {
+                          Vec3f rawColor = RawImage.at<Vec3f>(i,j);
+
+                          size_t c0 = COLOR_TO_BIN(rawColor[0]);
+                          size_t c1 = COLOR_TO_BIN(rawColor[1]);
+                          size_t c2 = COLOR_TO_BIN(rawColor[2]);
+
+                          RCGradientImageChannels[1].at<float>(i,j) = grad_gain*grad_c_lookup[COLOR_TO_INDEX(c0,c1,c2)];
+                        }
+                      }
+
+                      cv::resize(RCGradientImageChannels[0], RCGradientImageChannels[0], cv::Size(RawImageSmall.cols, RawImageSmall.rows));
+                      cv::resize(RCGradientImageChannels[1], RCGradientImageChannels[1], cv::Size(RawImageSmall.cols, RawImageSmall.rows));
                     }
                     break;
                   default:
@@ -459,10 +762,13 @@ int main( int argc, char *argv[] )
                 // and we set zero so the borders are taken care of
                 printf("constructed, solving...\n");
                 // aaaaand done
+/*
                 if (isnan(x(0)))
                   x = solver.solve(b);
                 else
                   x = solver.solveWithGuess(b, x);
+                */ x = solver.solve(b);
+
                 printf("solved\n");
 
                 Mat DepthImage(RawImageSmall.rows, RawImageSmall.cols, CV_32FC1);
@@ -478,67 +784,63 @@ int main( int argc, char *argv[] )
                   }
                   cout << "\n";
                 }
-                
+
                 if (save_images){
                   Mat DepthImageOut;
                   cv::resize(DepthImage, DepthImageOut, cv::Size(640, 480));
-                  DepthImageOut *= 255.0;
-                  DepthImageOut.convertTo(DepthImageOut, CV_8UC1);
+                  DepthImageOut *= 65535.0;
+                  DepthImageOut.convertTo(DepthImageOut, CV_16UC1);
                   std::ostringstream OutputFilename;
                   OutputFilename << "outputdepth/img_";
                   OutputFilename << setfill('0') << setw(7) << OutputImageNum;
-                  OutputFilename << ".jpg";
+                  OutputFilename << ".png";
                   imwrite(OutputFilename.str(), DepthImageOut);
                 }
 
                 // do some compression
-                vector<uchar> buf;
-                Mat DepthImageEnc;
-                DepthImage.copyTo(DepthImageEnc);
-                DepthImageEnc *= 255.0;
-                DepthImageEnc.convertTo(DepthImageEnc, CV_8UC1);
-                bool success = imencode(".jpg", DepthImageEnc, buf);
-                if (success){
-                  // LCM encode and publish contact image
-                  bot_core_image_t imagemsg;
-                  imagemsg.utime = getUnixTime() * 1000 * 1000;
-                  imagemsg.width = DepthImage.cols;
-                  imagemsg.height = DepthImage.rows;
-                  imagemsg.row_stride = 0;
-                  imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                  imagemsg.size = sizeof(uchar) * buf.size();
-                  imagemsg.data = &buf[0];
-                  imagemsg.nmetadata = 0;
-                  bot_core_image_t_publish(lcm, "GELSIGHT_DEPTH", &imagemsg);
+                {
+                  vector<uchar> buf;
+                  Mat DepthImageEnc;
+                  DepthImage.copyTo(DepthImageEnc);
+                  DepthImageEnc *= 255.0;
+                  DepthImageEnc.convertTo(DepthImageEnc, CV_8UC1);
+                  bool success = imencode(".jpg", DepthImageEnc, buf);
+                  if (success){
+                    // LCM encode and publish contact image
+                    bot_core_image_t imagemsg;
+                    imagemsg.utime = getUnixTime() * 1000 * 1000;
+                    imagemsg.width = DepthImage.cols;
+                    imagemsg.height = DepthImage.rows;
+                    imagemsg.row_stride = 0;
+                    imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                    imagemsg.size = sizeof(uchar) * buf.size();
+                    imagemsg.data = &buf[0];
+                    imagemsg.nmetadata = 0;
+                    bot_core_image_t_publish(lcm, "GELSIGHT_DEPTH", &imagemsg);
+                  }
                 }
 
-                // LCM encode and publish raw rgb array
-                Mat RawImageEnc;
-                RawImage.copyTo(RawImageEnc);
+                // do some compression
                 {
-                  int scale = 4;
-                  int width = (RawImageEnc.cols/scale);
-                  int height = (RawImageEnc.rows/scale);
-
-                  uint8_t img_values[width*height*3];
-                  for (int i=0; i<height; i++) {
-                    for (int j=0; j<width; j++) {
-                      Vec3f color = RawImageEnc.at<Vec3f>(i*scale,j*scale);
-                      img_values[(i*width + j)*3 + 0] = 125.0*color[2]; //B
-                      img_values[(i*width + j)*3 + 1] = 125.0*color[1]; //G
-                      img_values[(i*width + j)*3 + 2] = 125.0*color[0]; //R
-                    }
+                  vector<uchar> buf;
+                  Mat RawImageWithBGEnc;
+                  RawImageWithBGSmall.copyTo(RawImageWithBGEnc);
+                  RawImageWithBGEnc *= 255.0;
+                  RawImageWithBGEnc.convertTo(RawImageWithBGEnc, CV_8UC3);
+                  bool success = imencode(".jpg", RawImageWithBGEnc, buf);
+                  if (success){
+                    // LCM encode and publish contact image
+                    bot_core_image_t imagemsg;
+                    imagemsg.utime = getUnixTime() * 1000 * 1000;
+                    imagemsg.width = RawImageWithBG.cols;
+                    imagemsg.height = RawImageWithBG.rows;
+                    imagemsg.row_stride = 0;
+                    imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                    imagemsg.size = sizeof(uchar) * buf.size();
+                    imagemsg.data = &buf[0];
+                    imagemsg.nmetadata = 0;
+                    bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                   }
-                  bot_core_image_t imagemsg;
-                  imagemsg.utime = getUnixTime() * 1000 * 1000;
-                  imagemsg.width = width;
-                  imagemsg.height = height;
-                  imagemsg.row_stride = height;
-                  imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                  imagemsg.size = width*height*3;
-                  imagemsg.data = &(img_values[0]);
-                  imagemsg.nmetadata = 0;
-                  bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
                 }
 
                 if (visualize){
@@ -547,13 +849,17 @@ int main( int argc, char *argv[] )
                   cv::resize(GradientVisImage, GradientVisImageBigger, cv::Size(640, 480));
                   cv::resize(DepthImage, DepthImageBigger, cv::Size(640, 480));
                   cv::imshow("RawImage", RawImageWithBG);
-                  cv::imshow("GradientVisImage", GradientVisImageBigger);
+                  cv::imshow("GradientVisImage", 5*GradientVisImageBigger);
                   cv::imshow("DepthImage", DepthImageBigger);
+                  cv::imshow("BGImage", BGImage);
                 }
-                
+
                 OutputImageNum++;
             }
         }
     }
+
+    capture.release();
+
     return 0;
 }
