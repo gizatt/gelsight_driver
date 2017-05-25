@@ -871,17 +871,17 @@ int main( int argc, const char *argv[] )
 
                 if (opt.isSet("-p")){
                   // Visualize point cloud info.
-                  int x = 640;
-                  int y = 480;
+                  int x = DepthImage.cols;
+                  int y = DepthImage.rows;
                   Eigen::Matrix3Xd pts(3, x*y);
                   for (int u = 0; u < x; u++){
                     for (int v = 0; v < y; v++){
-                      pts(u*y+v, 0) = ((double)(u - x/2)) / ((double) (x/2));
-                      pts(u*y+v, 1) = ((double)(v - y/2)) / ((double) (y/2));
-                      pts(u*y+v, 2) = DepthImageEnc.at<double>(u, v);
+                      pts(0, u*y+v) = ((double)(u - x/2)) / ((double) (x/2));
+                      pts(1, u*y+v) = ((double)(v - y/2)) / ((double) (y/2));
+                      pts(2, u*y+v) = DepthImage.at<float>(v, u);
                     }
                   }
-                  rm.publishPointCloud(scene_pts_out, {"gelsight_pc"}, {0.1, 1.0, 0.1});
+                  rm.publishPointCloud(pts, {"gelsight_pc"});
                 }
 
                 OutputImageNum++;

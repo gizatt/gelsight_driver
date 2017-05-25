@@ -15,5 +15,5 @@ include_directories(${EIGEN3_INCLUDE_DIR})
 message("Eigen3 include dir" ${EIGEN3_INCLUDE_DIR})
 
 add_executable(gelsight_depth_driver gelsight_depth_driver.cpp)
-target_link_libraries(gelsight_depth_driver lcm ${OpenCV_LIBS} pthread bot2-core lcmtypes_bot2-core RemoteTreeViewerWrapper)
+target_link_libraries(gelsight_depth_driver lcm ${OpenCV_LIBS} pthread bot2-core lcmtypes_bot2-core drakeLcm RemoteTreeViewerWrapper)
 install(TARGETS gelsight_depth_driver DESTINATION bin)
