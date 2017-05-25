@@ -289,9 +289,10 @@ int main( int argc, const char *argv[] )
     pthread_t lcmThread;
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    capture.set(CV_CAP_PROP_BUFFERSIZE, 2); // Small software buffer
+    //capture.set(CV_CAP_PROP_BUFFERSIZE, 2); // Small software buffer
     capture.set(CV_CAP_PROP_FRAME_WIDTH,640);
     capture.set(CV_CAP_PROP_FRAME_HEIGHT,480);
+
 
     if (live_camera) {
       // if we're using a live camera, need to clear
