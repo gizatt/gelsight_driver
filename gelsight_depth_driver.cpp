@@ -873,15 +873,20 @@ int main( int argc, const char *argv[] )
                   // Visualize point cloud info.
                   int x = DepthImage.cols;
                   int y = DepthImage.rows;
+                  vector<vector<double>> colors;
                   Eigen::Matrix3Xd pts(3, x*y);
                   for (int u = 0; u < x; u++){
                     for (int v = 0; v < y; v++){
                       pts(0, u*y+v) = ((double)(u - x/2)) / ((double) (x/2));
                       pts(1, u*y+v) = ((double)(v - y/2)) / ((double) (y/2));
                       pts(2, u*y+v) = DepthImage.at<float>(v, u);
+                      float saturated_depth = max(min(pts(2, u*y+v), 1.0), 0.0);
+                      //colors.push_back({1.0-saturated_depth, saturated_depth, (saturated_depth)*(saturated_depth - 1.)*4.});
+                      Vec3f col = RawImageWithBGSmall.at<Vec3f>(v, u);
+                      colors.push_back({col[0], col[1], col[2]});
                     }
                   }
-                  rm.publishPointCloud(pts, {"gelsight_pc"});
+                  rm.publishPointCloud(pts, {"gelsight_pc"}, colors);
                 }
 
                 OutputImageNum++;
