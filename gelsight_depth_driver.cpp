@@ -28,6 +28,8 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <sys/stat.h> // mkdir
 #include "lib/ezOptionParser/ezOptionParser.hpp"
 
+#include "RemoteTreeViewerWrapper.hpp"
+
 #include <lcmtypes/bot_core_image_t.h>
 
 using namespace std;
@@ -184,6 +186,16 @@ int main( int argc, const char *argv[] )
       "--background-image" // Flag token.
     );
 
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Whether to visualize point cloud with RemoteTreeViewer.", // Help description.
+      "-p",     // Flag token.
+      "--point-pub" // Flag token.
+    );
+
     opt.parse(argc, argv);
 
     if (opt.isSet("-h")) {
@@ -290,6 +302,8 @@ int main( int argc, const char *argv[] )
     pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
     //capture.set(CV_CAP_PROP_BUFFERSIZE, 2); // Small software buffer
+    RemoteTreeViewerWrapper rm;
+
     capture.set(CV_CAP_PROP_FRAME_WIDTH,640);
     capture.set(CV_CAP_PROP_FRAME_HEIGHT,480);
 
@@ -853,6 +867,21 @@ int main( int argc, const char *argv[] )
                   cv::imshow("GradientVisImage", 5*GradientVisImageBigger);
                   cv::imshow("DepthImage", DepthImageBigger);
                   cv::imshow("BGImage", BGImage);
+                }
+
+                if (opt.isSet("-p")){
+                  // Visualize point cloud info.
+                  int x = 640;
+                  int y = 480;
+                  Eigen::Matrix3Xd pts(3, x*y);
+                  for (int u = 0; u < x; u++){
+                    for (int v = 0; v < y; v++){
+                      pts(u*y+v, 0) = ((double)(u - x/2)) / ((double) (x/2));
+                      pts(u*y+v, 1) = ((double)(v - y/2)) / ((double) (y/2));
+                      pts(u*y+v, 2) = DepthImageEnc.at<double>(u, v);
+                    }
+                  }
+                  rm.publishPointCloud(scene_pts_out, {"gelsight_pc"}, {0.1, 1.0, 0.1});
                 }
 
                 OutputImageNum++;
