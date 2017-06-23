@@ -55,7 +55,7 @@ static double getUnixTime(void)
  * like a mean-zero Gaussian PDF with a narrow sigma.
  * Specifically, it calculates 10000^(-(r*r)).
  */
-static inline float erf(float r) {
+static inline float erf10000(float r) {
     return pow(.0001,r*r);
 }
 
@@ -445,7 +445,7 @@ int main(int argc, const char *argv[])
                       int centercol = (aCenter.x+left+c+(SphereReference.cols/2));
 
                       float ptDist = sqrt(SQDIST(imrow-centerrow, imcol-centercol));
-                      float weight = erf(2*ptDist / RawImageWithBG.cols);
+                      float weight = erf10000(2*ptDist / RawImageWithBG.cols);
 
                       //~for every lookup point, make a contribution from each r-away reference point of N(r;0,sigma)
                       referencePointImgs[r][c] += weight * SphereAlignedHighRes;
