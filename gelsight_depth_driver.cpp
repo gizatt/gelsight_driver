@@ -51,8 +51,8 @@ using namespace ez;
 #define FILTER_ROWS 15
 #define FILTER_COLS 15
 #define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
-#define FILTER_IMROWS 96
-#define FILTER_IMCOLS 128
+#define FILTER_IMROWS 48 // 96
+#define FILTER_IMCOLS 64 // 128
 
 #define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
@@ -889,7 +889,7 @@ int main( int argc, const char *argv[] )
                     for (int u = 0; u < x; u++){
                       for (int v = 0; v < y; v++){
                         pts(0, u*y+v) = ((double)(u - x/2)) / ((double) (x/2));
-                        pts(1, u*y+v) = ((double)(v - y/2)) / ((double) (y/2));
+                        pts(1, u*y+v) = ((double)((y-v) - y/2)) / ((double) (y/2));
                         pts(2, u*y+v) = DepthImage.at<float>(v, u);
                         float saturated_depth = max(min(pts(2, u*y+v), 1.0), 0.0);
                         //colors.push_back({1.0-saturated_depth, saturated_depth, (saturated_depth)*(saturated_depth - 1.)*4.});
@@ -898,7 +898,6 @@ int main( int argc, const char *argv[] )
                       }
                       rm.publishPointCloud(scene_pts_out, {"gelsight_pc"}, {0.1, 1.0, 0.1});
                     }
-                    rm.publishPointCloud(pts, {"gelsight_pc"}, colors);
                   }
                 #endif
                 OutputImageNum++;
