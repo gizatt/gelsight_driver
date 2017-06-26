@@ -1,12 +1,21 @@
 language: cpp
 
-compiler:  
-    - gcc
-    - clang
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+      sudo: required
+    #- os: osx
+    #  sudo: required
 
-install:
-    - sudo apt-get -qq update
-    - sudo apt-get install -y pkg-config libeigen3-dev libopencv-dev
+addons:
+  apt:
+    packages:
+      - git
+      - cmake
+      - pkg-config
+      - libopencv-dev
+      - libeigen3-dev
 
 before_script:  
     - mkdir build
