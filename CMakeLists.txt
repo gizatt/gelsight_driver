@@ -40,7 +40,7 @@ add_executable(gelsight_depth_driver gelsight_depth_driver.cpp)
 
 if (BUILD_STANDALONE)
 	target_link_libraries(gelsight_depth_driver ${OpenCV_LIBS} pthread)
-	target_compile_definitions(gelsight_depth_driver PRIVATE BUILD_STANDALONE=1)
+	set_target_properties(gelsight_depth_driver PROPERTIES COMPILE_DEFINITIONS BUILD_STANDALONE=1)
 else()
 	target_link_libraries(gelsight_depth_driver ${OpenCV_LIBS} drakeLcm pthread bot2-core lcmtypes_bot2-core RemoteTreeViewerWrapper)
 endif()
