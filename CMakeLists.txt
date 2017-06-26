@@ -21,8 +21,6 @@ link_directories(${CMAKE_INSTALL_PREFIX}/lib)
 
 set(EIGEN3_INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include/eigen3)
 include_directories(${EIGEN3_INCLUDE_DIR}) 
-message("Eigen3 include dir" ${EIGEN3_INCLUDE_DIR})
-
 
 add_executable(groundtruth_gen gelsight_groundtruth_gen.cpp)
 target_link_libraries(groundtruth_gen ${OpenCV_LIBS} pthread)
