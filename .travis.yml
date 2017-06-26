@@ -6,7 +6,7 @@ compiler:
 
 install:
     - sudo apt-get -qq update
-    - sudo apt-get install -y libeigen3-dev libopencv-dev
+    - sudo apt-get install -y pkg-config libeigen3-dev libopencv-dev
 
 before_script:  
     - mkdir build

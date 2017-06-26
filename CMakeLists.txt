@@ -4,7 +4,11 @@ set(CMAKE_CXX_STANDARD 11)
 
 option(BUILD_STANDALONE "Build without LCM, RemoteTreeViewer, or Drake." ON)
 
+# Rely on PkgConfig to find Eigen, which is sometimes hard to find
 find_package(Eigen3 REQUIRED)
+find_package(PkgConfig)
+pkg_search_module(Eigen3 REQUIRED eigen3)
+
 find_package(OpenCV 2 REQUIRED)
 
 include_directories(${OpenCV_INCLUDE_DIRS})
