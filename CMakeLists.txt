@@ -2,25 +2,22 @@ cmake_minimum_required(VERSION 2.8)
 project(gelsight-driver)
 set(CMAKE_CXX_STANDARD 11)
 
-option(BUILD_STANDALONE "Build without LCM, RemoteTreeViewer, or Drake." OFF)
+option(BUILD_STANDALONE "Build without LCM, RemoteTreeViewer, or Drake." ON)
+
+find_package(Eigen3 REQUIRED)
+find_package(OpenCV 2 REQUIRED)
+
+include_directories(${OpenCV_INCLUDE_DIRS})
+include_directories(${EIGEN3_INCLUDE_DIR}) 
 
 if (!BUILD_STANDALONE)
 	find_package(drake REQUIRED)
-endif()
-
-find_package(OpenCV 2 REQUIRED)
-
-include_directories(${CMAKE_INSTALL_PREFIX})
-include_directories(${CMAKE_INSTALL_PREFIX}/include)
-
-if (!BUILD_STANDALONE)
 	include_directories(${CMAKE_INSTALL_PREFIX}/include/lcmtypes)
+	include_directories(${CMAKE_INSTALL_PREFIX})
+	include_directories(${CMAKE_INSTALL_PREFIX}/include)
 endif()
 
 link_directories(${CMAKE_INSTALL_PREFIX}/lib)
-
-set(EIGEN3_INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include/eigen3)
-include_directories(${EIGEN3_INCLUDE_DIR}) 
 
 add_executable(groundtruth_gen gelsight_groundtruth_gen.cpp)
 target_link_libraries(groundtruth_gen ${OpenCV_LIBS} pthread)
