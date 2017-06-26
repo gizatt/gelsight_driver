@@ -28,7 +28,11 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 #include <sys/stat.h> // mkdir
 #include "lib/ezOptionParser/ezOptionParser.hpp"
 
-#include <lcmtypes/bot_core_image_t.h>
+#ifndef BUILD_STANDALONE
+  #include "RemoteTreeViewerWrapper.hpp"
+  #include <lcmtypes/bot_core_image_t.h>
+#endif
+
 
 using namespace std;
 using namespace cv;
@@ -47,8 +51,8 @@ using namespace ez;
 #define FILTER_ROWS 15
 #define FILTER_COLS 15
 #define FILTER_SIZE (FILTER_ROWS * FILTER_COLS)
-#define FILTER_IMROWS 96
-#define FILTER_IMCOLS 128
+#define FILTER_IMROWS 48 // 96
+#define FILTER_IMCOLS 64 // 128
 
 #define BALL_RADIUS_GUESS 45  // radius of detected ball. TODO: Make this a CL argument
 #define BALL_RADIUS_GUESS_MARGIN (BALL_RADIUS_GUESS + 20)  // margin of error on ball radius, for HoughCircle
@@ -64,11 +68,13 @@ using namespace ez;
 #define SQDIST(x, y) ((x)*(x) + (y)*(y))
 #define MACRO_MAX(x, y) ((x) > (y) ? (x) : (y))
 
-void *lcmMonitor(void *plcm) {
-  lcm_t *lcm = (lcm_t *) plcm;
-  while (1)
-    lcm_handle(lcm);
-}
+#ifndef BUILD_STANDALONE
+  void *lcmMonitor(void *plcm) {
+    lcm_t *lcm = (lcm_t *) plcm;
+    while (1)
+      lcm_handle(lcm);
+  }
+#endif
 
 static double getUnixTime(void)
 {
@@ -184,6 +190,16 @@ int main( int argc, const char *argv[] )
       "--background-image" // Flag token.
     );
 
+    opt.add(
+      "", // Default.
+      0, // Required?
+      1, // Number of args expected.
+      0, // Delimiter if expecting multiple args.
+      "Whether to visualize point cloud with RemoteTreeViewer.", // Help description.
+      "-p",     // Flag token.
+      "--point-pub" // Flag token.
+    );
+
     opt.parse(argc, argv);
 
     if (opt.isSet("-h")) {
@@ -285,13 +301,18 @@ int main( int argc, const char *argv[] )
         mkdir("outputdepth", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     }
 
-    lcm_t * lcm = lcm_create("udpm://239.255.76.67:7667?ttl=0");
-    pthread_t lcmThread;
-    pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
+    #ifndef BUILD_STANDALONE
+      lcm_t * lcm = lcm_create("udpm://239.255.76.67:7667?ttl=0");
+      pthread_t lcmThread;
+      pthread_create(&lcmThread, NULL, lcmMonitor, lcm);
 
-    capture.set(CV_CAP_PROP_BUFFERSIZE, 2); // Small software buffer
+    //capture.set(CV_CAP_PROP_BUFFERSIZE, 2); // Small software buffer
+      RemoteTreeViewerWrapper rm;
+    #endif
+
     capture.set(CV_CAP_PROP_FRAME_WIDTH,640);
     capture.set(CV_CAP_PROP_FRAME_HEIGHT,480);
+
 
     if (live_camera) {
       // if we're using a live camera, need to clear
@@ -806,17 +827,19 @@ int main( int argc, const char *argv[] )
                   DepthImageEnc.convertTo(DepthImageEnc, CV_8UC1);
                   bool success = imencode(".jpg", DepthImageEnc, buf);
                   if (success){
-                    // LCM encode and publish contact image
-                    bot_core_image_t imagemsg;
-                    imagemsg.utime = getUnixTime() * 1000 * 1000;
-                    imagemsg.width = DepthImage.cols;
-                    imagemsg.height = DepthImage.rows;
-                    imagemsg.row_stride = 0;
-                    imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                    imagemsg.size = sizeof(uchar) * buf.size();
-                    imagemsg.data = &buf[0];
-                    imagemsg.nmetadata = 0;
-                    bot_core_image_t_publish(lcm, "GELSIGHT_DEPTH", &imagemsg);
+                    #ifndef BUILD_STANDALONE
+                      // LCM encode and publish contact image
+                      bot_core_image_t imagemsg;
+                      imagemsg.utime = getUnixTime() * 1000 * 1000;
+                      imagemsg.width = DepthImage.cols;
+                      imagemsg.height = DepthImage.rows;
+                      imagemsg.row_stride = 0;
+                      imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                      imagemsg.size = sizeof(uchar) * buf.size();
+                      imagemsg.data = &buf[0];
+                      imagemsg.nmetadata = 0;
+                      bot_core_image_t_publish(lcm, "GELSIGHT_DEPTH", &imagemsg);
+                    #endif
                   }
                 }
 
@@ -829,17 +852,19 @@ int main( int argc, const char *argv[] )
                   RawImageWithBGEnc.convertTo(RawImageWithBGEnc, CV_8UC3);
                   bool success = imencode(".jpg", RawImageWithBGEnc, buf);
                   if (success){
-                    // LCM encode and publish contact image
-                    bot_core_image_t imagemsg;
-                    imagemsg.utime = getUnixTime() * 1000 * 1000;
-                    imagemsg.width = RawImageWithBG.cols;
-                    imagemsg.height = RawImageWithBG.rows;
-                    imagemsg.row_stride = 0;
-                    imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
-                    imagemsg.size = sizeof(uchar) * buf.size();
-                    imagemsg.data = &buf[0];
-                    imagemsg.nmetadata = 0;
-                    bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
+                    #ifndef BUILD_STANDALONE
+                      // LCM encode and publish contact image
+                      bot_core_image_t imagemsg;
+                      imagemsg.utime = getUnixTime() * 1000 * 1000;
+                      imagemsg.width = RawImageWithBG.cols;
+                      imagemsg.height = RawImageWithBG.rows;
+                      imagemsg.row_stride = 0;
+                      imagemsg.pixelformat = BOT_CORE_IMAGE_T_PIXEL_FORMAT_MJPEG;
+                      imagemsg.size = sizeof(uchar) * buf.size();
+                      imagemsg.data = &buf[0];
+                      imagemsg.nmetadata = 0;
+                      bot_core_image_t_publish(lcm, "GELSIGHT_RAW", &imagemsg);
+                    #endif
                   }
                 }
 
@@ -854,6 +879,27 @@ int main( int argc, const char *argv[] )
                   cv::imshow("BGImage", BGImage);
                 }
 
+                #ifndef BUILD_STANDALONE
+                  if (opt.isSet("-p")){
+                    // Visualize point cloud info.
+                    int x = DepthImage.cols;
+                    int y = DepthImage.rows;
+                    vector<vector<double>> colors;
+                    Eigen::Matrix3Xd pts(3, x*y);
+                    for (int u = 0; u < x; u++){
+                      for (int v = 0; v < y; v++){
+                        pts(0, u*y+v) = ((double)(u - x/2)) / ((double) (x/2));
+                        pts(1, u*y+v) = ((double)((y-v) - y/2)) / ((double) (y/2));
+                        pts(2, u*y+v) = DepthImage.at<float>(v, u);
+                        float saturated_depth = max(min(pts(2, u*y+v), 1.0), 0.0);
+                        //colors.push_back({1.0-saturated_depth, saturated_depth, (saturated_depth)*(saturated_depth - 1.)*4.});
+                        Vec3f col = RawImageWithBGSmall.at<Vec3f>(v, u);
+                        colors.push_back({col[0], col[1], col[2]});
+                      }
+                      rm.publishPointCloud(scene_pts_out, {"gelsight_pc"}, {0.1, 1.0, 0.1});
+                    }
+                  }
+                #endif
                 OutputImageNum++;
             }
         }
