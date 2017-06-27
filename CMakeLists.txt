@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 2.8)
 project(gelsight-driver)
 set(CMAKE_CXX_STANDARD 11)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+
 option(BUILD_STANDALONE "Build without LCM, RemoteTreeViewer, or Drake." ON)
 
-# Rely on PkgConfig to find Eigen, which is sometimes hard to find
-find_package(PkgConfig REQUIRED)
-pkg_search_module(Eigen3 REQUIRED eigen3)
-include_directories(${Eigen3_INCLUDE_DIRS}) 
+find_package(Eigen REQUIRED 3.3)
+include_directories(${EIGEN_INCLUDE_DIR}) 
 
 # OpenCV is used for webcam interfacing and image processing
 find_package(OpenCV 2 REQUIRED)
