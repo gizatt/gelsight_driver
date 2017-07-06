@@ -1,15 +1,43 @@
 cmake_minimum_required(VERSION 2.8)
 project(gelsight-driver)
 set(CMAKE_CXX_STANDARD 11)
+include(ExternalProject)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
+option(BUILD_EIGEN "Build our own copy of Eigen 3.3" ON)
 option(BUILD_STANDALONE "Build without LCM, RemoteTreeViewer, or Drake." ON)
 
-find_package(Eigen REQUIRED 3.3)
-include_directories(${EIGEN_INCLUDE_DIR}) 
+# By default, don't install out to system.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE STRING
+    "Prefix for installation of sub-packages (note: required during build!)"
+    FORCE)
+endif()
+
+if (BUILD_EIGEN)
+	ExternalProject_Add( Eigen3
+	  URL "http://bitbucket.org/eigen/eigen/get/3.3.tar.gz"
+	  UPDATE_COMMAND ""
+	  CONFIGURE_COMMAND ""
+	  BUILD_COMMAND ""
+	  INSTALL_COMMAND
+	    ${CMAKE_COMMAND} -E copy_directory
+	      ${CMAKE_BINARY_DIR}/Eigen3-prefix/src/Eigen3/Eigen
+	      ${CMAKE_INSTALL_PREFIX}/include/Eigen3/Eigen &&
+	    ${CMAKE_COMMAND} -E copy_directory
+	      ${CMAKE_BINARY_DIR}/Eigen3-prefix/src/Eigen3/unsupported
+	      ${CMAKE_INSTALL_PREFIX}/include/Eigen3/unsupported
+	)
+	set(EIGEN3_INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include/Eigen3 )
+else()
+	list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+	find_package(Eigen3 3.3 REQUIRED)
+endif()
+
+include_directories(${EIGEN3_INCLUDE_DIR}) 
 
 # OpenCV is used for webcam interfacing and image processing
+# (and must be system-installed.)
 find_package(OpenCV 2 REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 

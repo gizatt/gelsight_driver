@@ -20,6 +20,6 @@ addons:
 before_script:  
     - mkdir build
     - cd build
-    - cmake .. -DBUILD_STANDALONE=1
+    - cmake
 
 script: make
