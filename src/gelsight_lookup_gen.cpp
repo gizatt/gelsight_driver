@@ -23,7 +23,7 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 
 #include "Eigen/IterativeLinearSolvers" // for least squares solving
 #include <sys/stat.h> // mkdir
-#include "lib/ezOptionParser/ezOptionParser.hpp"
+#include "ezOptionParser/ezOptionParser.hpp"
 
 using namespace std;
 using namespace cv;
