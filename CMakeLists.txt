@@ -5,6 +5,7 @@ include(ExternalProject)
 
 option(BUILD_EIGEN "Build our own copy of Eigen 3.3" ON)
 option(BUILD_STANDALONE "Build without LCM, RemoteTreeViewer, or Drake." ON)
+option(BUILD_SHEAR_APP "Build a shear estimation demo application." ON)
 
 # By default, don't install out to system.
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)

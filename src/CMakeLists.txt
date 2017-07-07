@@ -20,3 +20,7 @@ else()
 endif()
 
 install(TARGETS gelsight_depth_driver DESTINATION bin)
+
+if (BUILD_SHEAR_APP)
+	add_subdirectory(shear_app)
+endif()
