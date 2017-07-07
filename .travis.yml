@@ -15,6 +15,7 @@ addons:
       - cmake
       - pkg-config
       - libopencv-dev
+      - xawtv
 
 before_script:  
     - mkdir build
