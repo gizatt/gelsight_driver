@@ -1,17 +1,77 @@
-# MIT RLG Gelsight Repository #
+# MIT RLG GelSight Driver #
 
 --------------------
 
-Sandbox for drivers and experimental code for interface with Gelsight,
-for use with Robot Locomotion Group research.
+This repository includes both calibration and driver code for using
+a GelSight touch sensor.
 
-Dependencies: Roughly working OpenHumanoids reposities, plus
-```sudo apt-get install xawtv```, which containts a command-line tool
-for changing exposure values on the gelsight.
+## Installation and Dependencies ##
+
+This repository has been tested on 
+[Ubuntu 14.04](https://travis-ci.org/gizatt/gelsight_driver). It probably
+works on other versions of Linux, at least, but they are not actively
+supported yet. (One thing at a time.)
+
+For quick setup on Ubuntu, use:
+
+```
+sudo apt-get install cmake pkg-config libopencv-dev xawtv
+```
+
+`pkg-config` is necessary for the build, `opencv` is used for grabbing
+images from webcams and some image processing, and `xawtv` is used to
+adjust exposure settings on the GelSight webcam.
+
+To build, follow the standard CMake workflow:
+```
+mkdir -p build
+cd build
+cmake ..
+make
+make install
+```
+
+Installed binaries are placed in `build/install/bin`.
+
+## Running a GelSight Sensor ##
+
+The data flow with a GelSight sensor is:
+1) The webcam inside of the camera takes an RGB image.
+2) The driver maps from RGB to normal vector at each pixel using a calibration
+profile.
+3) The driver outputs a depth map for external consumption (which, for now,
+can be done via a render window to observe the pretty pictures, or over
+[LCM](https://lcm-proj.github.io/)).
+
+## Running the Depth Driver ##
+
+Assuming you have a calibration file available, you can run the
+depth driver with, for example,
+
+```build/install/bin/gelsight_depth_driver 0 -v 1 -o 0 -l trained_lookup.dat```
+
+Running `gelsight_depth_driver` with no arguments will cause it to spit out
+usage information.
 
 
+## Generating Calibration Data ##
 
-## Deriving Ground Truth ##
+Included in this repository is a calibration file `trained_lookup.dat`, but
+it will almost certainly not work well for your sensor. To generate your
+own lookup table, you will need a small ball bearing as a calibration target.
+(`TODO(gizatt): McMaster/Amazon link?`)
+
+Procedure:
+1. Use the depth driver to collect raw images of the ball bearing being
+rolled around on the sensor surface. Use the command
+```build/install/bin/gelsight_depth_driver <webcam #> -v 1 -o calibration_ims```,
+and slowly roll the ball bearing around on the GelSight surface so that there are
+plenty of images of the ball in all parts of the view. Be patient -- 5+ minutes
+worth of data helps a lot.
+2. `TODO(gizatt) Get hands on a gelsight and try this so I can write the next step
+correctly.`
+
+## Old README starts here, pls ignore
 
 1. Use `groundtruth_gen` utility to automatically generate a
 ground-truth look-up table from reference footage of ball bearings

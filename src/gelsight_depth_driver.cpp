@@ -23,10 +23,10 @@ https://wimsworld.wordpress.com/2013/07/19/webcam-on-beagleboardblack-using-open
 
 
 #include "Eigen/IterativeLinearSolvers" // for least squares solving
-#include "lib/libkdtree/kdtree++/kdtree.hpp" //
+#include "libkdtree/include/kdtree.hpp" //
 #include "rgbToGradientOctNode.hpp"          // for rgb octree
 #include <sys/stat.h> // mkdir
-#include "lib/ezOptionParser/ezOptionParser.hpp"
+#include "ezOptionParser/ezOptionParser.hpp"
 
 #ifndef BUILD_STANDALONE
   #include "RemoteTreeViewerWrapper.hpp"

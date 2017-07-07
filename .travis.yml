@@ -1,0 +1,25 @@
+language: cpp
+
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+      sudo: required
+    #- os: osx
+    #  sudo: required
+
+addons:
+  apt:
+    packages:
+      - git
+      - cmake
+      - pkg-config
+      - libopencv-dev
+      - xawtv
+
+before_script:  
+    - mkdir build
+    - cd build
+    - cmake ..
+
+script: make

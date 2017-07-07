@@ -146,7 +146,7 @@ void MarkerTrack::QuiverDisplayField(Mat& Frame)
         ptCenter+=3;
         pt2=pt1+Point(ptMove[0],ptMove[1])*QuiverScale;
         ptMove+=2;
-        arrowedLine(Frame,pt1, pt2, DisplayColor, DisplayThick);
+        line(Frame,pt1, pt2, DisplayColor, DisplayThick);
     }
 }
 
