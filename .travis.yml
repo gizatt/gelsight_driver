@@ -16,6 +16,7 @@ addons:
       - pkg-config
       - libopencv-dev
       - xawtv
+      - libyaml-cpp-dev
 
 before_script:  
     - mkdir build
