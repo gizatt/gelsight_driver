@@ -70,13 +70,11 @@ def create_dot_mask(input_image):
 
 def do_background_subtraction_with_masking(image, image_mask, bg_image, bg_mask):
     foreground = image - bg_image
-    foreground = foreground - np.min(foreground)
-    foreground = foreground / np.max(foreground)
     foreground_mask = np.logical_and(image_mask, bg_mask).astype(float)
     # Expand foreground mask from MxN to MxNx3 (full color)
     foreground_mask = np.expand_dims(foreground_mask, 2)
     foreground_mask = np.tile(foreground_mask, [1, 1, 3])
-    foreground = np.minimum(foreground, foreground_mask)
+    foreground = foreground * foreground_mask
     return foreground
 
 if __name__ =="__main__":
@@ -117,7 +115,7 @@ if __name__ =="__main__":
 
     # Get circle points
     cv2.namedWindow("Ball")
-    ball_foreground_drawing = deepcopy(ball_foreground)
+    ball_foreground_drawing = (ball_foreground_drawing + 1.0) / 2.0
     cv2.imshow("Ball", ball_foreground_drawing)
     cv2.setMouseCallback("Ball", handle_circle_click)
     click_x = []

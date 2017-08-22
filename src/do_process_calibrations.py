@@ -34,7 +34,9 @@ if __name__ =="__main__":
             contents = line.split(":")
             if contents[0] == "n_calib_pt":
                 this_sample = [float(x) for x in contents[1].split(",")]
-                color = np.array(this_sample[0:3])
+                # Normalize colors from [-1, 1] (as this is ultimately 
+                # a *difference of colors* channel) to [0, 1]
+                color = (np.array(this_sample[0:3]) + 1.0) / 2.0
                 normal = np.array(this_sample[3:6])
 
                 # Find the bin that it fits in
@@ -96,6 +98,9 @@ if __name__ =="__main__":
     color_set.resize(ind, 3)
     mean_var_count_set.resize(ind, 7)
 
+    # Rescale color_set to [-1, 1]
+    color_set = color_set*2.0 - 1.0
+    
     # And save these out to a reduced calibration
     f = open("filtered_%s.calib" % (datetime.datetime.now().isoformat()), 'w')
 
