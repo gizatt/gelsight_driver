@@ -168,7 +168,7 @@ if __name__ =="__main__":
 
     # Save out to a file the image size, image scaling,
     # and a list of [color from bg], [normal] pairs
-    f = open("%s.calib" % (datetime.datetime.now().isoformat()), 'w')
+    f = open("ball_%s.calib" % (datetime.datetime.now().isoformat()), 'w')
     f.write("image_size: %d, %d\n" % (bg_image.shape[0], bg_image.shape[1]))
     f.write("pixel_to_mm_scale: %0.5f\n" % pixel_to_mm_scale)
 
