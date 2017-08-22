@@ -4,6 +4,7 @@ from copy import deepcopy
 from scipy  import optimize
 import math
 import datetime
+import sys
 
 # Circle fitting modified from
 # http://scipy-cookbook.readthedocs.io/items/Least_Squares_Circle.html
@@ -48,17 +49,6 @@ def fit_circle_to_pts(x, y):
 click_x = []
 click_y = []
 
-def handle_rod_click(event, x, y, flags, param):
-    # grab references to the global variables
-    global click_x, click_y
- 
-    # if the left mouse button was clicked, record the starting
-    # (x, y) coordinates and indicate that cropping is being
-    # performed
-    if event == cv2.EVENT_LBUTTONDOWN:
-        click_x.append(x)
-        click_y.append(y)
-
 def handle_circle_click(event, x, y, flags, param):
     # grab references to the global variables
     global click_x, click_y
@@ -90,49 +80,45 @@ def do_background_subtraction_with_masking(image, image_mask, bg_image, bg_mask)
     return foreground
 
 if __name__ =="__main__":
-    bg_image = cv2.imread('../build/bearing_quarterinch/0000000.jpg', cv2.IMREAD_COLOR).astype(float)/255.
-    ball_image = cv2.imread('../build/bearing_quarterinch/0000100.jpg', cv2.IMREAD_COLOR).astype(float)/255.
-    rod_image = cv2.imread('../build/rod_quarterinch/0000100.jpg', cv2.IMREAD_COLOR).astype(float)/255.
+    if len(sys.argv) != 4:
+        print "Requires 3 arguments: <ball_image_name> <background_image_name> <calibration file with scaling"
+        exit(0)
+
+    ball_image_name = sys.argv[1]
+    bg_image_name = sys.argv[2]
+    calibration_file = sys.argv[3]
+
+    f = open(calibration_file)
+    for line in f:
+        contents = line.split(":")
+        if contents[0] == "pixel_to_mm_scale":
+            pixel_to_mm_scale = float(contents[1])
+        elif contents[0] == "image_size":
+            image_size = [int(x) for x in contents[1].split(",")]
+
+    bg_image = cv2.imread(bg_image_name, cv2.IMREAD_COLOR).astype(float)/255.
+    ball_image = cv2.imread(ball_image_name, cv2.IMREAD_COLOR).astype(float)/255.
+
+    if bg_image.shape != ball_image.shape:
+        print "Ball and background images have different sizes!"
+        exit(-1)
+
+    if bg_image.shape[0] != image_size[0] or bg_image.shape[1] != image_size[1]:
+        print "Ball and background image have different size from calibration file!"
+        print bg_image.shape[0:2], " vs ", image_size
+        exit(-1)
 
     # Detect any tracking dots or dark spots in the bg and ball images
     bg_mask = create_dot_mask(bg_image)
     ball_mask = create_dot_mask(ball_image)
-    rod_mask = create_dot_mask(rod_image)
     
     # background substraction
     ball_foreground = do_background_subtraction_with_masking(ball_image, ball_mask, bg_image, bg_mask)
-    rod_foreground = do_background_subtraction_with_masking(rod_image, rod_mask, bg_image, bg_mask)
 
-    # Show rod, get clicked points around bounding box of the box    
-    cv2.namedWindow("Rod")
-    rod_foreground_drawing = deepcopy(rod_foreground)
-    cv2.imshow("Rod", rod_foreground_drawing)
-    cv2.setMouseCallback("Rod", handle_rod_click)
-
+    # Get circle points
     cv2.namedWindow("Ball")
     ball_foreground_drawing = deepcopy(ball_foreground)
     cv2.imshow("Ball", ball_foreground_drawing)
-
-    click_x = []
-    click_y = []
-    cv2.waitKey(0)
-
-    if len(click_x) != 4:
-        print "Click only on the four corners! Saw ", len(click_x), "!=4 clicks."
-        exit(-1)
-    dists = []
-    for i in range(4):
-        i2 = (i + 1) % 4
-        cv2.line(rod_foreground_drawing, (click_x[i],click_y[i]),(click_x[i2],click_y[i2]),(0,0,255),2)
-        dists.append( math.sqrt(float(click_y[i2] - click_y[i])**2 + float(click_x[i2] - click_x[i])**2) )
-        cv2.imshow("Rod", rod_foreground_drawing)
-    distance = np.mean(np.array(dists))
-    rod_side_length_mm = 6.35 # 0.25 inches -> mm
-    pixel_to_mm_scale = rod_side_length_mm / distance
-    print "Detected scaling: ", pixel_to_mm_scale, " mm per pixel"
-    print "Detected scaling: ", 1. / pixel_to_mm_scale, " pixels per mm"
-
-    # And then get circle points
     cv2.setMouseCallback("Ball", handle_circle_click)
     click_x = []
     click_y = []
