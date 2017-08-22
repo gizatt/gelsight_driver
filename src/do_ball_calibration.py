@@ -115,7 +115,7 @@ if __name__ =="__main__":
 
     # Get circle points
     cv2.namedWindow("Ball")
-    ball_foreground_drawing = (ball_foreground_drawing + 1.0) / 2.0
+    ball_foreground_drawing = (ball_foreground + 1.0) / 2.0
     cv2.imshow("Ball", ball_foreground_drawing)
     cv2.setMouseCallback("Ball", handle_circle_click)
     click_x = []

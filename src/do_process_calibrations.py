@@ -100,13 +100,15 @@ if __name__ =="__main__":
 
     # Rescale color_set to [-1, 1]
     color_set = color_set*2.0 - 1.0
-    
+
     # And save these out to a reduced calibration
     f = open("filtered_%s.calib" % (datetime.datetime.now().isoformat()), 'w')
 
     f.write("image_size: %d, %d\n" % (image_size[0], image_size[1]))
     f.write("pixel_to_mm_scale: %0.5f\n" % pixel_to_mm_scale_mean)
-    f.write("pixel_to_mm_scale_variance: %0.5f\n" % pixel_to_mm_scale_M2)
+    # The variance is not likely to be valid, as we have separated
+    # the scaling calibration from the ball calibration, so
+    # the same scaling calibration will show up multiple times
     f.write("total_files_sampled: %d\n" % pixel_to_mm_scale_count)
 
     for i in range(ind):
