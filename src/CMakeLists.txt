@@ -1,3 +1,5 @@
+find_package(yaml-cpp)
+
 add_library(gelsight_depth_driver gelsight_depth_driver.cc)
 target_link_libraries(gelsight_depth_driver yaml-cpp ${OpenCV_LIBS} pthread)
 
