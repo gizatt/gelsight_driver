@@ -8,6 +8,8 @@ import sys
 
 from do_ball_calibration import create_dot_mask, do_background_subtraction_with_masking
 
+from poisson_reconstruct import poisson_reconstruct
+
 if __name__ =="__main__":
     # Load in the calibration file
     if len(sys.argv) != 2:
@@ -57,25 +59,40 @@ if __name__ =="__main__":
         # background substraction
         foreground = do_background_subtraction_with_masking(image, image_mask, bg_image, bg_mask)
 
-        scaled_image = cv2.resize(image,None,fx=0.25, fy=0.25, interpolation = cv2.INTER_CUBIC)
-        pts_distances, pts_inds = color_tree.query(scaled_image, k=10)
+        scaling = 0.33
+        scaled_image = cv2.resize(foreground,None,fx=scaling, fy=scaling, interpolation = cv2.INTER_NEAREST)
+        scaled_mask = cv2.resize(image_mask,None,fx=scaling, fy=scaling, interpolation = cv2.INTER_NEAREST)
+        pts_distances, pts_inds = color_tree.query(scaled_image, k=2)
         # Todo: use variances and counts to weight how I pick my normals?
         normals_image = np.mean(mean_set[pts_inds, :], 2)
+        normals_image[:, :, 0] *= scaled_mask
+        normals_image[:, :, 1] *= scaled_mask
+        # Don't zero the latter, so all gradients go to zero (and not undefined)
+
+        # do poisson reconstruction
+        gradx = -pixel_to_mm_scale * normals_image[:, :, 0] / normals_image[:, :, 2]
+        grady = -pixel_to_mm_scale * normals_image[:, :, 1] / normals_image[:, :, 2]
+        boundarysrc = normals_image[:, :, 0] * 0
+        depth_image = poisson_reconstruct(grady, gradx, boundarysrc)
 
         full_size_normals_image = cv2.resize(normals_image, (foreground.shape[1], foreground.shape[0]))
-
+        full_size_depth_image = cv2.resize(depth_image, (foreground.shape[1], foreground.shape[0]))
 
         foreground_display = (foreground + 1.0)/2.0
         normals_display = (full_size_normals_image + 1.0) / 2.0
+        depth_display = full_size_depth_image / 0.2 #max(np.max(full_size_depth_image), 0.2) # min range of 100um
+        depth_display = np.dstack((
+            np.clip(1. - 3.*np.abs(depth_display-0.33), 0, 1),
+            np.clip(1. - 2.*np.abs(depth_display-0.66), 0, 1),
+            np.clip(depth_display, 0, 1)
+            ))
 
-        print "forground: ", np.mean(foreground_display, axis=(0, 1))
-        print "normals: ", np.mean(normals_display, axis=(0, 1))
+        print "Average foreground: ", np.mean(foreground_display, axis=(0, 1))
+        print "Average normal: ", np.mean(normals_display, axis=(0, 1))
+        print "Max depth: ", np.max(depth_image, axis=(0, 1))
+        print "Min depth: ", np.min(depth_image, axis=(0, 1))
 
-        print normals_display[200, 200, :]
-        print normals_display[200, 201, :]
-        print normals_display[200, 202, :]
-
-        display_image = np.concatenate((foreground_display, normals_display), axis=1)
+        display_image = np.concatenate((foreground_display, normals_display, depth_display), axis=1)
         cv2.imshow('Reconstructions',display_image)
         key = cv2.waitKey(1)
         if key & 0xFF == ord('q'):
@@ -83,8 +100,6 @@ if __name__ =="__main__":
         elif key & 0xFF == ord('b'):
             bg_image = deepcopy(image)
             bg_mask = deepcopy(image_mask)
-        
-
 
     # When everything done, release the capture
     cap.release()
