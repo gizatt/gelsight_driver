@@ -36,6 +36,9 @@ int main(int argc, char** argv) {
     return -1;
   }
 
+  printf("DISCLAIMER: this can read raw webcam images, but cannot do\n"
+         "any kinds of reconstructions. Use the python scripts instead.\n");
+  
   if (args["help"]) {
     cerr << argparser;
     return 0;
