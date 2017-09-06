@@ -78,7 +78,7 @@ if __name__ =="__main__":
         full_size_normals_image = cv2.resize(normals_image, (foreground.shape[1], foreground.shape[0]))
         full_size_depth_image = cv2.resize(depth_image, (foreground.shape[1], foreground.shape[0]))
 
-        foreground_display = (foreground + 1.0)/2.0
+        foreground_display = (image + 1.0)/2.0
         normals_display = (full_size_normals_image + 1.0) / 2.0
         depth_display = full_size_depth_image / 0.2 #max(np.max(full_size_depth_image), 0.2) # min range of 100um
         depth_display = np.dstack((

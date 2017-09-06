@@ -14,13 +14,21 @@ supported yet. (One thing at a time.)
 
 For quick setup on Ubuntu, use:
 
+
 ```
-sudo apt-get install cmake pkg-config libopencv-dev xawtv
+sudo apt-get install git cmake pkg-config libopencv-dev python-opencv xawtv libyaml-cpp-dev libboost-all-dev
 ```
 
 `pkg-config` is necessary for the build, `opencv` is used for grabbing
-images from webcams and some image processing, and `xawtv` is used to
-adjust exposure settings on the GelSight webcam.
+images from webcams and some image processing, `xawtv` is used to
+adjust exposure settings on the GelSight webcam, 'yaml' is used for
+configuration and calibration files.
+
+The python files also need dependencies:
+
+```pip install numpy scipy```
+
+and maybe some more that I'm forgetting (please update this README if you find them!).
 
 To build, follow the standard CMake workflow:
 ```
@@ -32,6 +40,12 @@ make install
 ```
 
 Installed binaries are placed in `build/install/bin`.
+
+This repository includes two versions of (WIP!) drivers for the Gelsight
+sensor. A C++ version capable of reading the webcam (but not doing reconstruction)
+is in `src/gelsight_depth_driver.*`. It will eventually be fleshed out, but
+a Python prototype of the calibration and driver functionality is instead
+available in files `src/do_*.py`.
 
 ## Running a GelSight Sensor ##
 
@@ -45,77 +59,47 @@ can be done via a render window to observe the pretty pictures, or over
 
 ## Running the Depth Driver ##
 
-Assuming you have a calibration file available, you can run the
-depth driver with, for example,
+Assuming you have a calibration file available (one is provided in 
+`src/filtered_2017-08-22T19:03:38.648270.calib`, performed on the
+blue-and-electrical-tape Gelsight unit in 32-380), you can run the
+Python depth driver with:
 
-```build/install/bin/gelsight_depth_driver 0 -v 1 -o 0 -l trained_lookup.dat```
+```python do_normal_and_depth_reconstruction.py <path_to_calibration_file>```
 
-Running `gelsight_depth_driver` with no arguments will cause it to spit out
-usage information.
+This application will show three images side-by-side:
 
+![Example Python Driver Image](docs/example_python_driver_image.png)
+
+You can try running `build/install/bin/run_gelsight_depth_driver --help` to see its
+command-line options, and use it to get raw webcam images to sanity-check
+that your Gelsight images look OK.
 
 ## Generating Calibration Data ##
 
-Included in this repository is a calibration file `trained_lookup.dat`, but
-it will almost certainly not work well for your sensor. To generate your
-own lookup table, you will need a small ball bearing as a calibration target.
-(`TODO(gizatt): McMaster/Amazon link?`)
+To generate your own calibration via the Python scripts, you'll need two
+things:
+  - A rod with a square cross section of known side-length, in order to
+    calibration the lateral scaling of the sensor (pixels-to-lateral-mms
+    scaling). I use 1/4" square stock, and the parameters in the
+    `do_rod_calibration.py` script assume this size.
+  - A bearing ball of known size. `do_ball_calibration.py` assumes
+    a 1/4" ball. This is for calibrating the RGB-to-normal-map step.
 
-Procedure:
-1. Use the depth driver to collect raw images of the ball bearing being
-rolled around on the sensor surface. Use the command
-```build/install/bin/gelsight_depth_driver <webcam #> -v 1 -o calibration_ims```,
-and slowly roll the ball bearing around on the GelSight surface so that there are
-plenty of images of the ball in all parts of the view. Be patient -- 5+ minutes
-worth of data helps a lot.
-2. `TODO(gizatt) Get hands on a gelsight and try this so I can write the next step
-correctly.`
-
-## Old README starts here, pls ignore
-
-1. Use `groundtruth_gen` utility to automatically generate a
-ground-truth look-up table from reference footage of ball bearings
-on the gelsight surface. To run this utility, make sure you
-first record the footage you will be using, eg. by running
-
-        ./build/gelsight_depth_driver [ARGS]
-
-  with the appropriate arguments so that it records all footage to some
-  output folder.
-
-2. Next, run the groundtruth generator on these image:
-
-        ./build/groundtruth_gen [path_to_imgs]
-
-  for example, if the images were in the `output` folder and were  named
-  `img_0000000.jpg` - `img_0000314.jpg` then one could run:
-
-        ./build/groundtruth_gen output/img_%07d.jpg
-
-  This will create the folder `./groundtruth/` with the following structure:
-
-  * `groundtruth/`
-    * `spherealigned/`
-    * `sphereextracted/`
-    * `sphererefptimgs/`
-    * `sphere_standard.jpg`
-    * `circle_index.csv`
-
-  This contains the ground truth information necessary to use a
-  look-up table  to invert the depth map (for reference, the final
-  derived sphere images are in `sphererefptimgs/`).
-
-4. If the images in `spherealigned/` look off-center,
-  you can pick a new reference
-  image by looking in `sphereextracted/` for a more-centered or more-clear
-  candidate. Copy the desired image to the top level directory:
-
-        cp ./groundtruth/sphereextracted/img_0000XXX.jpg ./my_reference_img.jpg
-
-  Then, run `groundtruth_gen` again with this image as the "reference
-  image", eg.:
-
-        ./build/groundtruth_gen output/img_%07d.jpg -r ./my_reference_img.jpg
-
-  This will produced final images that are more centered.
-
+The procedure is (and this is still WIP/hacky!):
+1. Use `build/install/bin/run_gelsight_depth_driver -s rod` to collect
+images of you touching the 1/4" rod to the surface of the Gelsight.
+2. Run `python do_rod_calibration <path to clear rod image> <path to background image> `
+and then click on the four corners of the rod. The script should spit out
+a `rod_calib_*.calib" file and report a reasonable pixel-to-mm scaling (something
+like 30mm per pixel).
+3. Use `build/install/bin/run_gelsight_depth_driver -s rod` to collect
+images of you rolling the ball bearing on the Gelsight. Collect images of
+the ball in a few different locations, and a few different pressures (sizes).
+4. Use `python do_ball_calibration <path to a clear ball image> <path to a ball bg image> <path to rod calib file>`
+on each clear ball image that you like (I recommend at least 5 or 6). Click on a few points around the
+edge of the circle until a circle fit appears, then hit any key to exit. It should spit out a
+`ball_*.calib` file.
+5. Run `python do_process_calibrations.py <first ball calib> <second ball calib> ... <last ball calib>`,
+which should spit out a `filtered_*.calib` file. This is your calibration for the Gelsight! (It's a YAML
+file containing the mm_to_pixel scaling, as well as a grid of RGB-to-normal calibration points that the
+driver uses to perform the reconstruction.
