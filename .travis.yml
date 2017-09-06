@@ -16,6 +16,8 @@ addons:
       - pkg-config
       - libopencv-dev
       - xawtv
+      - libyaml-cpp-dev
+      - libboost-all-dev
 
 before_script:  
     - mkdir build
